@@ -503,15 +503,14 @@ export function deriveView(graph: DerivedGraph): {
 	return { nodes: [...graph.nodes, ...impNodes], edges, logicalEdges, impLinks };
 }
 
-// ─── the /api/graph payload ──────────────────────────────────────────────────
+// ─── /api/graph 接口的有效载荷 (payload) ──────────────────────────────────────────────────
 
-/** Everything the home graph view needs, in one fetch (shape: contracts). */
+/** 通过一次 fetch 获取主页图形视图所需要的一切数据 (数据形状参见：contracts 契约)。 */
 export function graphSnapshot(deps: GraphDeps): GraphSnapshot {
 	const graph = getGraph(deps.graphStore);
-	// The canvas-facing lossy image: propositions + derived implication
-	// nodes, untyped arrows. `chains` (the stored truth) ride along for
-	// the chain table — it reads the truth, never the derived fan-out,
-	// never the derived fan-out.
+	// 面向画布的有损视图映射：命题 (propositions) + 派生出的蕴含关系节点 (implication nodes) 以及无类型箭头。
+	// `chains` (存储的真实数据) 随数据一同返回以供推理链表格使用 —
+	// 表格直接读取真相(truth)，绝不读取派生出的扇出(fan-out)数据。
 	const view = deriveView(graph);
 	const nodes = view.nodes;
 
@@ -527,9 +526,9 @@ export function graphSnapshot(deps: GraphDeps): GraphSnapshot {
 	for (const node of nodes) {
 		for (const pt of node.provenance) touch(node.id, pt.chatId);
 	}
-	// Labels for every source the graph can point back at: real chats
-	// (title, deep-linkable) and imported notes files (path, static — the
-	// format-agnostic front door's provenance).
+	// 为图(graph)可以指向的每一个数据源提供标签：包括真实的聊天
+	// (聊天标题，支持深度链接 deep-linkable) 以及导入的笔记文件
+	// (文件路径，静态的 — 这是与格式无关的入口点数据溯源)。
 	const sourceIds = new Set<string>();
 	for (const chats of nodeChats.values()) {
 		for (const id of chats) sourceIds.add(id);
@@ -552,16 +551,16 @@ export function graphSnapshot(deps: GraphDeps): GraphSnapshot {
 		if (ids.length > 0) nodeSessions[nodeId] = ids;
 	}
 
-	// BIRTH-SESSION CLUSTERS (wave 7, owner-locked 2026-09-23): embeddings
-	// are dead — a cluster is the SESSION THAT CREATED ITS PROPOSITIONS,
-	// derived on read from provenance (core/session-clusters.ts). The label
-	// is the session's NAME (chat title / file path): no LLM naming pass, no
-	// persisted partition to invalidate. MIN_CLUSTER_SIZE stays the hull
-	// presentation rule (a region needs >= 3 propositions for a hull). A
-	// birth session whose record is gone (deleted chat) keeps its members
-	// but renders unlabeled — honest, never guessed.
-	// PROPOSITIONS ONLY (owner, 2026-09-30): derived implication nodes
-	// never partition — the stored world clusters, its image follows.
+	// 基于“诞生会话”的聚类 (wave 7，由所有者锁定于 2026-09-23)：
+	// 向量嵌入方案(embeddings)已被废弃 — 现在的聚类就是“创建了这些命题的会话”，
+	// 在读取时根据出处信息(provenance)进行派生 (参见 core/session-clusters.ts)。
+	// 聚类的标签就是该会话的名字 (聊天标题 / 文件路径)：不再需要大模型(LLM)去生成名字，
+	// 也不再有持久化的分区数据需要处理失效逻辑。MIN_CLUSTER_SIZE 依然是用于控制外壳(hull)的
+	// 展示规则 (一个区域 >= 3 个命题才值得画外壳)。
+	// 如果某个诞生会话的记录已丢失 (比如聊天被删了)，它的成员仍会保留但会渲染为无标签状态 —
+	// 诚实展示，绝不瞎猜。
+	// 【仅限命题 (PROPOSITIONS ONLY)】 (所有者规则，2026-09-30)：派生出的蕴含关系节点
+	// (implication nodes) 绝不参与划分 — 由存储的世界决定聚类，视图仅仅是跟随。
 	const communities = birthSessionPartition(graph.nodes);
 	const clusters: Cluster[] = communities
 		.filter((community) => community.members.length >= MIN_CLUSTER_SIZE)
@@ -570,17 +569,17 @@ export function graphSnapshot(deps: GraphDeps): GraphSnapshot {
 			label: sessions[community.id] ?? fileSources[community.id] ?? null,
 			members: community.members,
 		}));
-	// IMP-NODE CLUSTER ASSIGNMENT (owner, 2026-09-30): majority among the
-	// premises' birth sessions, ties to the chain's own birth — attached
-	// AFTER the hull filter so a two-proposition community + its bundle
-	// never resurrects a hull (the filter counts propositions). Both
-	// cluster-membership consumers — the sim's centroid pull and the
-	// canvas's region rasterization — read it through this one list.
+	// 蕴含节点 (IMP-NODE) 的聚类分配 (所有者规则，2026-09-30)：
+	// 基于前提节点所处诞生会话的多数票决定，平票时依据链自身的诞生时间处理 —
+	// 这个操作发生在“外壳过滤器 (hull filter)”之后，因此一个 2 命题的社区 + 它的附属链
+	// 绝对不会“复活”触发外壳渲染 (因为过滤器只计算命题数)。
+	// 消费聚类成员关系的两方 (物理模拟(sim)的质心拉力 和 画布的区域栅格化)
+	// 都会通过这唯一一个列表读取该信息。
 	attachImpToCommunities(clusters, graph.nodes, graph.chains);
 
-	// Resting layout (Option A): the positions ledger, when the settle has
-	// ever run. Absent on a fresh graph — the view falls back to its own
-	// one-shot pass until the first merge writes the ledger.
+	// 静止布局(Resting layout) (选项 A)：位置账本 (当结算 settling 曾经运行过时)。
+	// 在一个全新的图表上它是不存在的 — 视图会回退到它自己的一次性排版计算，
+	// 直到第一次数据合并操作将位置写入账本。
 	const positions = deps.graphStore.readPositions();
 
 	return {
@@ -598,35 +597,40 @@ export function graphSnapshot(deps: GraphDeps): GraphSnapshot {
 	};
 }
 
-// ─── Prober graph tools — the data seam (wave 7, owner-locked 2026-09-23) ───
+// ─── 探针图工具 (Prober graph tools) — 数据接缝 (wave 7，由所有者锁定于 2026-09-23) ───
 
-/** One session in the prober's graph view: every provenance anchor the
- *  graph can name — a real chat (deep-linkable) or an imported notes file
- *  (owner ruling 2026-09-23: files are birth-sessions too, kind "file").
- *  The prober's session-list tool renders these; the per-session view is
- *  graphSessionPropositions below. Pure derivation over the same ports
- *  the snapshot reads — Teacher's tool handlers call these in-process. */
+/**
+ * 探针图视图中的一个会话 (GraphSessionEntry)：代表图中能够命名的所有数据溯源锚点 —
+ * 可以是一个真实的聊天 (支持深度链接) 或是一个导入的笔记文件
+ * (所有者 2026-09-23 裁决：文件同样也被视为“诞生会话”，其 kind 为 "file")。
+ * 探针的会话列表工具负责渲染它们；按会话查看详情视图由下方的 graphSessionPropositions 提供。
+ * 这是完全通过和 snapshot 相同的读取端口派生而出的纯逻辑 —
+ * 教师 (Teacher) 的工具处理程序在进程内调用它们。
+ */
 export interface GraphSessionEntry {
-	/** chatId or notes source id ("src_…") — the birth-session key. */
+	/** chatId 或笔记数据源的 id (如 "src_…") — 它是诞生会话的唯一键。 */
 	id: string;
-	/** The chat's title, or the file's path — the cluster label's source. */
+	/** 聊天的标题，或文件的路径 — 也就是聚类标签的来源。 */
 	name: string;
-	/** A real chat (its record still exists) or an imported notes file. */
+	/** 标识这是一个真实的聊天 (记录仍然存在) 还是导入的笔记文件。 */
 	kind: "chat" | "file";
-	/** When the session began: the chat's createdAt, or the file's
-	 *  importedAt. null when no record can date it. */
+	/** 该会话开始的时间：即聊天的 createdAt，或文件的 importedAt。
+	 *  当没有记录可以证明其日期时为 null。 */
 	createdAt: string | null;
-	/** Most recent activity: the chat's updatedAt, or the file's
-	 *  importedAt. null when no record can date it. */
+	/** 最近的活动时间：即聊天的 updatedAt，或文件的 importedAt。
+	 *  当没有记录可以证明其日期时为 null。 */
 	updatedAt: string | null;
-	/** How many propositions were BORN in this session (birth-session
-	 *  clustering's count — shared/re-encountered nodes count for their
-	 *  birth session only). */
+	/** 有多少个命题是诞生 (BORN) 在该会话中的 (基于诞生会话聚类逻辑的计数 —
+	 *  共享/再次相遇的节点只计算在其原始诞生会话中)。 */
 	propositions: number;
 }
 
-/** The prober's session list: every birth session, most-recently-active
- *  first (undatable records sink, in stable id order). */
+/**
+ * 探针的会话列表：返回每个诞生会话，按照“最近活跃”排序靠前
+ * (无法确定日期的记录会沉到底部，并按 id 保持稳定的顺序)。
+ * @param deps 图数据依赖端口
+ * @returns 会话列表数组
+ */
 export function graphSessionIndex(deps: GraphDeps): GraphSessionEntry[] {
 	const counts = new Map<string, number>();
 	const born = getGraph(deps.graphStore);
@@ -666,17 +670,24 @@ export function graphSessionIndex(deps: GraphDeps): GraphSessionEntry[] {
 	);
 }
 
-/** One birth proposition of one session — WHAT WAS COVERED there (2026-09-27
- *  cleanup: no understanding levels; assessment is
- *  territory and nothing writes it until that module exists). */
+/**
+ * 某个会话下诞生的单个命题 — 也就是该会话曾涉及(COVERED)的知识点
+ * (2026-09-27 整理说明：这里不包含理解程度/掌握度；那是评估模块的领域，
+ * 在该模块建立之前不会有任何代码尝试写入它)。
+ */
 export interface GraphSessionProposition {
 	nodeId: string;
-	/** The compact handle — the same name the canvas shows. */
+	/** 紧凑的展示句柄 — 也就是画布上显示的名字。 */
 	name: string;
 }
 
-/** The propositions BORN in one session — what that session first
- *  articulated. Members sorted by node id — deterministic. */
+/**
+ * 诞生 (BORN) 于特定某个会话中的命题 — 即该会话首次阐明的知识点。
+ * 成员列表会根据 node id 进行排序 — 保证输出的确定性 (deterministic)。
+ * @param deps 图数据依赖端口
+ * @param sessionId 会话的唯一 ID
+ * @returns 命题数组
+ */
 export function graphSessionPropositions(deps: GraphDeps, sessionId: string): GraphSessionProposition[] {
 	const born = getGraph(deps.graphStore).nodes.filter((node) => birthSessionOf(node) === sessionId);
 	return born

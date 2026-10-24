@@ -292,9 +292,14 @@ export function keptIndexFor(messages: readonly LhMessage[], marker: LhMarkerMes
 
 // ─── the summarizer input (pi's mirror: labeled text, truncated results) ─────
 
-/** Serialize a message span as labeled text for the summarizer. Tool
- * results truncate at ~2k chars (the kept tail carries them verbatim for
- * the model; the SUMMARY only needs their gist). */
+/**
+ * 将一段消息序列化为带有标签的文本，供总结器 (summarizer) 使用。
+ * 工具执行结果 (Tool results) 会在截断在约 2k 字符 (保留在尾部的未处理记录会原样提供给模型，
+ * 但这里的“总结”只需要它们的概要/主旨gist)。
+ *
+ * @param messages 需要序列化的 LhMessage 消息列表
+ * @returns 序列化后的纯文本字符串
+ */
 export function serializeForSummary(messages: readonly LhMessage[]): string {
 	const lines: string[] = [];
 	for (const m of messages) {
@@ -330,10 +335,16 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 	return lines.join("\n\n");
 }
 
-/** Render the plan dependency tree verbatim (owner requirement: the tree
- * persists through compaction). Structure from record.tree, statuses
- * derived from the transcript (the record's own law: the tree carries
- * structure only). Empty tree → absent section (nothing persisted). */
+/**
+ * 原样渲染计划依赖树的文本形式 (所有者要求：计划树必须完整通过压缩过程被持久化保留)。
+ * 树的结构来自 `record.tree`，而各个节点的状态则通过转录记录 (transcript) 推导得出
+ * (这是数据记录自身定下的法则：树结构本身只负责保存结构)。
+ * 如果树为空 → 对应的输出片段不存在 (没有内容需要保留)。
+ *
+ * @param tree 计划树对象，可能为 undefined
+ * @param messages 用于推导状态的上下文消息记录
+ * @returns 格式化后的计划树文本，如果为空则返回 null
+ */
 export function planTreeToText(tree: PlanTree | undefined, messages: readonly LhMessage[]): string | null {
 	if (!tree || tree.nodes.length === 0) return null;
 	const statuses = derivePlanStatusesLh(tree, messages);
@@ -353,18 +364,21 @@ export function planTreeToText(tree: PlanTree | undefined, messages: readonly Lh
 }
 
 /**
- * The summarizer prompt. The summary's REQUIRED SHAPE (owner rulings):
- * the learner's understanding AND its evolution, the teaching arc, the
- * plan tree verbatim, and the current moment — in that order of stress.
- * The summarizer is the session's own model (owner ruling), writing for
- * its own future self: the summary replaces everything before the cut.
+ * 生成总结器(压缩)的提示词 (prompt)。
+ * 根据所有者的规定，总结的【必须格式/包含的内容】按强调顺序依次为：
+ * 学习者的理解及其演变过程、教学的进展轨迹、原封不动的计划树、当前的即时状态。
+ * 总结器是由会话当前使用的模型自身来担任 (所有者规定)，它是在为“未来的自己”做记录：
+ * 这个总结将完全替换掉“切割点 (cut)”之前的所有对话记录。
+ *
+ * @param input 包含序列化后文本、计划树文本及会话类型的输入对象
+ * @returns 拼接完整的供总结器读取的提示词字符串
  */
 export function buildCompactionPrompt(input: {
-	/** The span to summarize, pre-serialized (serializeForSummary). */
+	/** 需要进行总结的消息片段，已经是序列化后的文本格式 (通过 serializeForSummary 生成)。 */
 	spanText: string;
-	/** The plan tree rendered (planTreeToText) or null. */
+	/** 渲染好的计划树文本 (通过 planTreeToText 生成)，或者为 null。 */
 	planTreeText: string | null;
-	/** The session kind (wording: tutor vs practice agent). */
+	/** 会话的类型 (决定了提示词的称呼：教学 tutor 或是 练习 practice)。 */
 	kind: "teach" | "practice" | "probe";
 }): string {
 	const planSection =
