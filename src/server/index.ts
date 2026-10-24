@@ -13,9 +13,8 @@ export * from "./commit-positions.ts";
 export * from "./jobs.ts";
 export * from "./stores.ts";
 export { readRenderSettings, writeRenderSettings } from "../store/render-settings.ts";
-// The settings record + prompt overrides (settings-storage wave, 2026-09-19).
-// The *Record aliases keep the app/api/settings routes explicit about which
-// seam they touch (the raw record, not the chat-section convenience view).
+// 设置记录 + 提示覆盖（settings record + prompt overrides，settings-storage wave, 2026-09-19）。
+// *Record 别名使得 app/api/settings 路由明确它们触及的是哪个接缝（原始记录，而不是 chat-section 便捷视图）。
 export {
 	readSettings as readSettingsRecord,
 	writeSettings as writeSettingsRecord,
@@ -23,15 +22,14 @@ export {
 } from "../store/settings.ts";
 export { promptOverrides } from "../store/prompt-overrides.ts";
 export { isValidSegmentPath } from "../core/prompt-segments.ts";
-// The canonical segment discovery/resolution lives in the agent layer
-// (composition is an agent concern); the barrel re-exports it for the
-// routes — server→agent is the lawful direction (chat-handler precedent).
+// 规范的片段发现/解析位于代理层（组合是代理的关注点）；
+// 桶（barrel）为路由重新导出它 — server→agent 是合法的方向（chat-handler 先例）。
 export { effectivePromptSegments, allSegmentPaths, readPromptOverride } from "../agent/prompt-segments.ts";
 
-// The auth/keys composition (auth-keys wave, 2026-09-19): the curated
-// key catalog + the env-reflecting store behind GET/PUT/DELETE /api/keys.
-// Importing this module runs the idempotent boot fill-gap — every consumer
-// keeps its plain process.env reads (that seam is the point).
+// auth/keys 组合（auth-keys wave, 2026-09-19）：精选的
+// 密钥目录 + GET/PUT/DELETE /api/keys 后面的环境反映存储。
+// 导入此模块运行幂等的启动间隙填充（boot fill-gap） — 每个消费者
+// 保持其普通的 process.env 读取（那个接缝就是重点）。
 export * from "./keys.ts";
 export * from "./search.ts";
 export { authStore } from "../store/auth.ts";

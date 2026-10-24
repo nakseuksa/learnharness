@@ -1,37 +1,30 @@
 /**
- * Server-side commit for the live physics drag (PUT /api/graph/positions).
- * The client's renderer anneals a drag to rest and PUTs the new rest
- * state; the server trusts it for the nodes it knows about and, if the
- * graph grew while the user was dragging (a merge landed), runs ONE
- * incremental settle (settleGraphLayout) so the fresh nodes are absorbed
- * into the frame the user just arranged — client positions act as
- * anchors, never as a clobber.
+ * 实时物理拖拽的服务器端提交（PUT /api/graph/positions）。
+ * 客户端的渲染器将拖拽退火（anneals）至静止状态，并 PUT 新的静止状态；
+ * 服务器信任它所知道的节点，并且如果图谱在用户拖拽时增长（合并（merge）已落盘），
+ * 则运行一次增量结算（settleGraphLayout），使得新节点被吸收到用户刚刚排列的框架中 —
+ * 客户端位置作为锚点（anchors），从不作为覆盖（clobber）。
  *
- * Every body is sanitized: garbage coordinates clamp or drop, unknown
- * ids are discarded, nothing throws.
+ * 每个请求体都被净化（sanitized）：垃圾坐标被钳制或丢弃，未知 id 被丢弃，不会抛出异常。
  *
- * KNOWN IDS = THE CANVAS'S WORLD (owner fix, 2026-10-06 — the splatter
- * bug): the derived view's nodes — stored propositions AND the derived
- * arg_ implication nodes. The canvas persists all of them; stripping
- * the args here purged their ledger entries on every drag-commit, so
- * each mount re-seeded them on a giant ring (the "splattered from the
- * middle" report) until a drag annealed them back. arg_ ids are stable
- * (minted from the chain ledger), so persisting them is sound.
+ * 已知 ID = 画布的世界（KNOWN IDS = THE CANVAS'S WORLD，owner fix, 2026-10-06 — 飞溅错误）：
+ * 派生视图的节点 — 存储的命题（propositions）和派生的 arg_ 含义节点（implication nodes）。
+ * 画布持久化所有这些节点；在这里剥离 args 会在每次拖拽提交时清除它们的账本条目，
+ * 因此每次挂载都会将它们重新播种到一个巨大的环上（“从中间飞溅”的报告），直到拖拽将它们退火回去。
+ * arg_ ids 是稳定的（从链账本铸造），因此持久化它们是可靠的。
  */
 import type { Position } from "../core/contracts.ts";
 import { deriveView, getGraph } from "../core/graph.ts";
 import { settleGraphLayout } from "../core/layout-settle.ts";
 import { stores } from "./stores.ts";
 
-/** Max |x| or |y| accepted — NaN/Infinity clamp here, absurd too. */
+/** 接受的最大 |x| 或 |y| — NaN/Infinity 在这里钳制，荒谬的值也一样。 */
 const MAX_COORD = 1e6;
 
 /**
- * Accepts the raw PUT body (a Record of id → {x, y}) and returns the
- * sanitized positions actually persisted (empty object = nothing written,
- * e.g. a body with no known ids — the caller reports but never fails).
- */
-/**
+ * 接受原始的 PUT body（一个 id → {x, y} 的记录（Record））并返回实际持久化的已净化位置
+ * （空对象 = 未写入任何内容，例如没有已知 id 的请求体 — 调用者报告但从不失败）。
+ *
  * 处理 PUT /api/graph/positions 的节点坐标持久化请求。
  * 客户端渲染器在完成拖拽并退火达到静止状态后提交新的节点位置。
  * 该函数负责清理与验证这些坐标，仅保存图谱中已知的节点 ID，同时抛弃或限制非法坐标。
