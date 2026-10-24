@@ -65,6 +65,12 @@ export interface ActivityExtraction {
  *  graph changed underneath me" (a merge landed, a deletion purged) and
  *  refetch clusters/layout. Reads never move it; the DELETE response
  *  returns the same stamp. */
+/**
+ * 组装后台活动大盘的聚合负载数据（供 `/api/activity` 端点读取）。
+ * 这里汇总了所有正在运行的“子代理作业 (jobs)”和“提取任务 (extractions)”，
+ * 并且附加了最新的图谱版本戳（`graphRevision`）用于前端判定是否需要刷新知识图谱。
+ * @returns 包含所有正在运行的作业、提取任务和当前图谱修订号的复合对象。
+ */
 export function activityFeed(): {
 	jobs: ActivityJob[];
 	extractions: ActivityExtraction[];

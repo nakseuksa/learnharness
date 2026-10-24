@@ -27,6 +27,14 @@
 import { subscribe, type ServerEvent } from "../core/events.ts";
 
 /** One window's subscription as an SSE Response. */
+/**
+ * 建立并返回针对当前窗口/标签页的 SSE（Server-Sent Events）响应流。
+ * - 该响应流通过核心事件总线订阅后端发生的各类事件，并将事件转换为标准的 SSE 格式（`event: \n data: \n\n`）推送到客户端。
+ * - 使用 25 秒的定期心跳（`: ping`）保持连接存活。
+ * - 当客户端断开（`cancel` 被调用）时，自动清理事件订阅和心跳定时器。
+ *
+ * @returns 包含持续推送事件流的 HTTP Response 对象。
+ */
 export function eventsResponse(): Response {
 	const encoder = new TextEncoder();
 	let teardown: (() => void) | undefined;

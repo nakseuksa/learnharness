@@ -18,6 +18,12 @@ import { isTurnRunning } from "./turn-liveness.ts";
  * argument.
  */
 
+/**
+ * 暴露自 `stores.chatStore` 的聊天记录基本操作方法。
+ * - createChat: 创建新的会话。
+ * - getChat: 获取指定会话详细内容。
+ * - listChats: 列出所有会话。
+ */
 export const { createChat, getChat, listChats } = stores.chatStore;
 export { titleFromPrompt };
 export type { ChatDeleteMode, ChatDeletionStats } from "../core/graph-deletion.ts";
@@ -64,6 +70,18 @@ export type ChatDeleteOutcome =
  *      (extraction.ts) closes the last window: a run that slipped past
  *      the wind-down finds the chat gone at its merge and aborts with
  *      nothing merged.
+ */
+/**
+ * 删除一个会话（遵循 2026-09-22/23 的决定）：先进行状态门控校验，然后执行清理。
+ * 具有严格的编排顺序以保证数据一致性：
+ *
+ * 1. 门控（GATES）：如果有正在运行的 turn 或后台任务，则拒绝删除并返回 409 错误，因为在运行中删除会导致并发写入时的状态损坏。UI 会在任务完成后重试。
+ * 2. 提取管线终止（EXTRACTION WIND-DOWN）：如果会话有提取任务在运行，调用 `abortExtraction` 真实终止任务（不再合并提取结果），并等待退出。如果超时会返回可重试的 503 错误。
+ * 3. 同步清理块（THE SYNC BLOCK）：清理底层数据时绝对不能有 await 等待。这样可以保证事件循环不会在清理期间释放给其他任务，从而确保知识图谱账本、任务以及会话记录的删除是原子性的。删除顺序为：图谱账本 -> 任务 -> 会话记录。
+ *
+ * @param chatId 要删除的会话的唯一标识符。
+ * @param mode 删除模式（控制图谱数据删除范围）。
+ * @returns 包含删除成功与否状态及统计信息的对象。
  */
 export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): Promise<ChatDeleteOutcome> {
 	if (!stores.chatStore.getChat(chatId)) {
@@ -136,6 +154,15 @@ export interface SessionCoverage {
 
 /** The per-session coverage block (see SessionCoverage). Null when the
  *  chat doesn't exist — callers own the 404. */
+/**
+ * 获取指定会话的覆盖率统计区块信息（参考 `SessionCoverage` 接口）。
+ * 该统计数据用于 UI 显示会话中已经被提取到图谱中的内容比例。
+ *
+ * 若会话不存在，则返回 null，由调用方负责处理 404 响应。
+ *
+ * @param chatId 会话的唯一标识符。
+ * @returns 包含提取统计、运行状态、和最后合并时间的 `SessionCoverage` 对象；若会话不存在返回 null。
+ */
 export function sessionCoverage(chatId: string): SessionCoverage | null {
 	const record = stores.chatStore.getChat(chatId);
 	if (!record) return null;

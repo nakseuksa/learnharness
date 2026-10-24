@@ -120,12 +120,22 @@ function state(): CompactionState {
 
 /** Is a compaction running for this chat? (The client status event's
  *  server-side twin — tests and the SSE emitter read it.) */
+/**
+ * 检查指定会话是否正在后台执行上下文压缩（汇总）操作。
+ * @param chatId 会话的唯一标识符。
+ * @returns 若该会话的压缩任务正在运行中则返回 true，否则返回 false。
+ */
 export function compactionInFlight(chatId: string): boolean {
 	return state().inFlight.has(chatId);
 }
 
 /** Await any in-flight compaction for the chat — the structural gate
  *  every model interaction for the chat passes through. */
+/**
+ * 等待指定会话的后台压缩任务完成（若存在）。
+ * 如果该会话有正在运行的压缩任务，函数将挂起并每隔 100ms 轮询直到任务完成。
+ * @param chatId 会话的唯一标识符。
+ */
 export async function awaitCompaction(chatId: string): Promise<void> {
 	const running = state().inFlight.get(chatId);
 	if (running) await running;
@@ -135,6 +145,15 @@ export async function awaitCompaction(chatId: string): Promise<void> {
 
 /** Resolve the effective trigger. Unknown window → the setting alone
  *  (honest: no fake window — the catalog-index precedent). */
+/**
+ * 计算实际生效的上下文压缩阈值（Token 数）。
+ * 优先使用用户设置的阈值，如果未设置，则根据所用模型的上下文窗口大小降级计算：
+ * 如果模型上下文未提供，则回退至硬编码的 `COMPACTION_THRESHOLD_DEFAULT` (150k)。
+ * 如果上下文小于安全下限，则返回最大值（表示永远不触发压缩）。
+ * @param settingTokens 用户设置的阈值。
+ * @param contextWindowTokens 模型支持的最大上下文窗口。
+ * @returns 计算后的实际压缩阈值（Token数）。
+ */
 export function effectiveThresholdTokens(settingTokens: number | undefined, contextWindowTokens: number | undefined): number {
 	const setting = settingTokens ?? 150_000;
 	if (contextWindowTokens === undefined) return setting;
@@ -153,6 +172,14 @@ export function effectiveThresholdTokens(settingTokens: number | undefined, cont
  *  carry), so the fallback path runs the plain heuristic over the
  *  CUT-HONORED projection (never the dropped span) plus the additive
  *  prompt term the anchor would have covered. */
+/**
+ * 估算给定消息历史记录中的总 Token 数。
+ * 粗略估算规则为：将所有消息的内容、角色、调用以及工具返回的文本转换为字符串，长度除以 4。
+ * 加上预估的系统提示词 Token 数，从而决定是否需要进行上下文压缩。
+ * @param messages 聊天消息记录。
+ * @param systemPromptTokens 系统提示词的预估 Token 数量。
+ * @returns 预估的总 Token 数。
+ */
 export function projectedContextTokens(messages: readonly LhMessage[], systemPromptTokens: number): number {
 	const est = estimateContextTokens(messages);
 	if (est.lastUsageIndex !== null) return est.tokens;
@@ -261,6 +288,14 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
  * caller's request waits; the owner's structural-gate ruling). Idempotent
  * under concurrency through the registry mutex.
  */
+/**
+ * 保证当前会话上下文已经被压缩。
+ * 如果该会话已经有一个正在进行的压缩任务，该函数会等待其完成。
+ * 若没有，且估算的 Token 超过阈值，则会立即在当前线程上启动压缩。
+ * （该函数在聊天请求的门控阶段被调用，用来阻止请求直到上下文适合传递给模型）。
+ * @param deps 压缩所需的依赖（包括引擎、模型、数据库接口等）。
+ * @param chatId 会话的唯一标识符。
+ */
 export async function ensureCompacted(deps: CompactionDeps, chatId: string): Promise<void> {
 	// Skipped under tests, the extraction-trigger precedent: scripted
 	// chats are fixtures — the service itself is tested directly with an
@@ -287,6 +322,14 @@ export async function ensureCompacted(deps: CompactionDeps, chatId: string): Pro
  * chat-handler's onFinish tail; engineless or over-threshold-nothing
  * are silent no-ops. The next turn's ensureCompacted gate picks up
  * whatever this leaves running.
+ */
+/**
+ * 触发后台上下文压缩。
+ * 如果当前上下文超过了 Token 阈值，并且当前没有正在运行的压缩任务，
+ * 就会在后台生成一个异步任务进行汇总合并。如果依赖不足或无需压缩，则无操作。
+ *
+ * @param buildDeps 一个工厂函数，用于提供压缩执行所需要的依赖配置（若返回 null 则中止触发）。
+ * @param chatId 目标会话的唯一标识符。
  */
 export function kickCompaction(buildDeps: () => CompactionDeps | null, chatId: string): void {
 	if (state().inFlight.has(chatId)) return;

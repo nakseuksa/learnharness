@@ -46,6 +46,13 @@ function callBlocks(message: unknown): Array<{ id: string } & Record<string, unk
 /** The ids every consumer may already have seen: all call ids and result
  *  ids in a message list (the chat record — including its legacy dupes,
  *  which is the point: membership is what drives minting). */
+/**
+ * 遍历给定的对话记录列表，收集已出现的所有工具调用 ID (Tool Call IDs)。
+ * 这是为了在去重器初始化时，将其置入 seen 集合，从而保证历史记录不会与当前生成回合的重复 ID 发生冲突。
+ *
+ * @param messages 历史对话消息列表。
+ * @returns 所有已使用的 tool-call IDs。
+ */
 export function collectToolCallIds(messages: readonly unknown[]): string[] {
 	const ids: string[] = [];
 	for (const m of messages) {
@@ -60,6 +67,12 @@ export function collectToolCallIds(messages: readonly unknown[]): string[] {
 	return ids;
 }
 
+/**
+ * 工具调用 ID 去重器（The Lacan Fix 修复方案）。
+ * 由于一些模型提供商（如通过 OpenRouter 调用的 DeepSeek）每回合返回的 tool-call ids 会从 "call_0" 重新开始，
+ * 该类负责拦截所有的代理流事件并在系统边界赋予全局唯一的标识。
+ * 它确保：历史遗留不修改，同一响应批次中的 call 与 result 结对更新，避免发生键碰撞破坏应用内部的逻辑联结。
+ */
 export class ToolCallIdUniquifier {
 	private readonly seen = new Set<string>();
 	/** assistant message object → its (origId → uniqueId) table. Weak: the

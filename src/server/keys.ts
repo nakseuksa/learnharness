@@ -73,6 +73,12 @@ function boot(): AuthBoot {
 
 /** Is `id` a WRITABLE key name — curated catalog or model-provider env
  *  var (provider-keys interlude: PUT/DELETE accept both). */
+/**
+ * 检查指定的键 ID 是否允许由应用写入（在可写入白名单中）。
+ * 只有属于 `AUTH_KEYS` 中定义的提供商及服务密钥才可以被持久化存储。
+ * @param id 密钥的唯一标识（一般对应大写的环境变量名）。
+ * @returns 是否允许写入。
+ */
 export function isWritableAuthKey(id: string): boolean {
 	return isKnownAuthKey(id) || isProviderEnvVar(id);
 }
@@ -81,6 +87,10 @@ export function isWritableAuthKey(id: string): boolean {
  *  a plain key ({id, envVar, label} — no-drift-pinned, see the table's doc
  *  in core/auth-keys.ts and tests/auth-provider-keys.test.ts). Sorted by
  *  id for a stable payload. */
+/**
+ * 获取当前所有受支持和允许持久化的认证密钥元数据列表。
+ * @returns `AUTH_KEYS` 配置对象的数组表示。
+ */
 export function providerKeyList() {
 	return [...AUTH_PROVIDER_KEYS].sort((a, b) => a.id.localeCompare(b.id));
 }
@@ -88,6 +98,10 @@ export function providerKeyList() {
 /** The fresh-user switch (owner, interlude 2026-09-22): env keys are
  *  invisible app-wide — deleted from the process at boot, file keys only.
  *  Read live per call (the launcher exports it before boot). */
+/**
+ * 检查是否启动了 "忽略环境变量密钥" 模式 (`LH_IGNORE_ENV_KEYS`)。
+ * @returns 如果设置为 "1"，则返回 true（忽略系统的环境变量，仅使用本地存储）。
+ */
 export function envKeysIgnored(): boolean {
 	return process.env.LH_IGNORE_ENV_KEYS === "1";
 }
@@ -97,6 +111,11 @@ export function envKeysIgnored(): boolean {
  * are real env; later calls (HMR re-import, or after a hand-edit) only fill
  * vars still unset in the env, so a var deleted through the API never
  * resurrects (its file entry is gone too).
+ */
+/**
+ * 启动时初始化认证环境变量：将本地存储（`.env.local` 之类的机制或应用内文件）中的密钥合并到 `process.env` 中。
+ * 这个动作确保了 `pi-ai` 等底层包无需更改逻辑即可正常读取到用户填写的 API Key。
+ * （该函数在启动阶段被调用一次）
  */
 export function initAuthEnv(): void {
 	const record = boot();
@@ -142,6 +161,14 @@ function isManagedName(name: string): boolean {
  * The pure status projection — exported for tests. `env` is the live
  * process env view; `realEnv` the boot snapshot (env precedence).
  */
+/**
+ * 纯粹的认证状态解析计算，用于生成包含状态的列表给 UI 展示，同时也作为可导出的纯逻辑供测试使用。
+ * 计算结果反映某个键：它是缺失的、还是由环境变量注入的，抑或是保存在本地文件的。
+ * @param catalog 系统支持的全部密钥清单配置。
+ * @param readRecord 从本地存储读取当前保存值的回调。
+ * @param env 运行时环境变量对象（`process.env`）。
+ * @returns 每个键的详细状态。
+ */
 export function resolveKeyStatuses(
 	fileVars: Record<string, string>,
 	env: Record<string, string | undefined>,
@@ -177,6 +204,10 @@ export function resolveKeyStatuses(
 }
 
 /** The GET view: every curated key (present or not) + unknown file vars. */
+/**
+ * 获取实际的密钥配置状态列表（用于前端展示每个服务密钥当前是配置在 ENV 还是 FILE 或者是缺失）。
+ * @returns 密钥状态列表。
+ */
 export function keyStatuses(): AuthKeyStatus[] {
 	return resolveKeyStatuses(authStore.authVars(), process.env, boot().realEnv, AUTH_PROVIDER_ENV_VARS);
 }
@@ -185,6 +216,13 @@ export function keyStatuses(): AuthKeyStatus[] {
  *  read for consumers that don't live behind the @/src/server barrel (the
  *  STT route was the one cold-boot hole: a first-ever request to it would
  *  otherwise read env before any fill-gap ran). */
+/**
+ * 获取指定 ID 密钥的当前真实值。
+ * 读取逻辑为：如果未开启屏蔽 ENV 功能，优先读取 `process.env`（可能来自环境变量或之前被文件填充），
+ * 否则仅读取本地存储。
+ * @param id 密钥的环境变量名（如 `OPENAI_API_KEY`）。
+ * @returns 密钥字符串，如果不存在则返回 undefined。
+ */
 export function keyValue(id: string): string | undefined {
 	// The fresh-user switch: ONLY the file store counts (belt-and-
 	// suspenders — the boot deletion already emptied the env; this guards
@@ -199,6 +237,12 @@ export function keyValue(id: string): string | undefined {
  * natively at every request — so an env-shadowed key counts as present
  * (gate by what would run). Providers absent from AUTH_PROVIDER_KEYS take
  * no key at all: nothing to gate, present by definition. */
+/**
+ * 判断指定提供商 (Provider) 的密钥是否可用。
+ * 它会查找提供商映射到的对应环境变量是否在当前运行时存在值。
+ * @param provider 提供商名称 (例如 "openai", "anthropic")。
+ * @returns 可用时返回 true。
+ */
 export function providerKeyPresent(provider: string): boolean {
 	const info = AUTH_PROVIDER_KEYS.find((p) => p.id === provider);
 	return info ? keyValue(info.envVar) !== undefined : true;
@@ -209,6 +253,13 @@ export function providerKeyPresent(provider: string): boolean {
  * 400s, never stored), then the file write, then the env reflection. A
  * var that the REAL env owns is not reflected (env wins — the status row
  * reports shadowedByEnv so the page can explain it).
+ */
+/**
+ * 保存或更新一个密钥值。
+ * 它会先验证键是否允许写入，然后存入本地存储，如果当前未屏蔽 ENV，则将其注入 `process.env` 以立即生效。
+ * @param id 密钥名称。
+ * @param value 密钥的具体内容。
+ * @returns 成功则返回新状态，否则返回错误信息。
  */
 export function saveKey(id: string, value: string): { ok: true; status: AuthKeyStatus } | { ok: false; error: string } {
 	const shape = isProviderEnvVar(id) ? genericProviderKeyGuard(id, value) : validateKeyShape(id, value);
@@ -228,6 +279,13 @@ export function saveKey(id: string, value: string): { ok: true; status: AuthKeyS
  * Remove one key (DELETE): gone from the file always; gone from the env
  * only when the env copy was OURS (fill-gap) — a real env var stays (env
  * wins) and the status shows the key still present from env.
+ */
+/**
+ * 删除本地保存的某个密钥。
+ * 只会删除本地文件存储并清理被注入到 `process.env` 中的同名本地残留。
+ * 注意：真正定义在系统环境变量中的原始值不会被删除。
+ * @param id 密钥名称。
+ * @returns 删除操作后的键最新状态。
  */
 export function deleteKey(id: string): AuthKeyStatus {
 	authStore.deleteAuthVar(id);

@@ -51,6 +51,13 @@ export type ModelDto = ModelCatalogEntry;
  * envelope. An unset thinkingLevel resolves from DEFAULT_THINKING_ORDER at
  * engine build (reported as absent here).
  */
+/**
+ * 确定指定平台的默认模型配置（如果存在）。用于 "Defaults" 按钮一键填充，或在新用户引导时使用。
+ * 根据提供的模型提供商和型号，回落匹配出对应的配置。
+ * @param models 支持的模型枚举记录。
+ * @param provider 指定的模型提供商（"openai" 或 "anthropic"）。
+ * @returns 匹配的平台默认模型及选项。
+ */
 export function catalogDefaultsFor(
 	strong: EffectiveSlot | null,
 ): CatalogDefaults | null {
@@ -65,6 +72,10 @@ export function catalogDefaultsFor(
 
 /** The conversation agents' resolved default — what a settings-less chat
  *  runs: the strong slot, i.e. the birth-default for new sessions. */
+/**
+ * 解析系统级的所有模型默认选项（用于首选项/备用填充）。
+ * @returns 包含各提供商的推荐模型映射对象。
+ */
 export function catalogDefaults(): CatalogDefaults | null {
 	return catalogDefaultsFor(effectiveSettings().models.strong);
 }
@@ -73,6 +84,13 @@ export function catalogDefaults(): CatalogDefaults | null {
  *  settings UI's "Default: <actual pinned model>" caption reads this).
  *  BYOK (owner, 2026-09-22): an empty chain projects to NULL — the caption
  *  honestly shows "not configured", never a phantom default. */
+/**
+ * 解析各种独立模型角色（如提取、图谱总结、翻译）预置绑定的推荐模型。
+ * 平台不同的默认引擎被分配给了不同的职责，这能保证最优的工作流体验。
+ * @param models 支持的模型列表。
+ * @param provider 提供商上下文。
+ * @returns 模型角色到实际模型配置的映射。
+ */
 export function rolePinsFor(
 	models: Record<BackgroundModelRole, EffectiveModelSpec | undefined>,
 ): RolePins {
@@ -93,6 +111,10 @@ export function rolePinsFor(
  *  override → tier slot → nothing — the same resolution the agent wiring
  *  uses (src/server/stores.ts effectiveSettings), so the caption can
  *  never drift from what actually runs. */
+/**
+ * 集中获取全系统定义的各模型角色对应推荐的模型配置。
+ * @returns 各角色绑定的模型及选项信息。
+ */
 export function catalogRolePins(): RolePins {
 	return rolePinsFor(effectiveSettings().agent.models);
 }
@@ -101,6 +123,11 @@ export function catalogRolePins(): RolePins {
  *  verbatim: the same resolution the engine wiring uses, so the Models
  *  settings page's captions cannot drift from what actually runs. NULL
  *  per tier that holds no model. */
+/**
+ * （Wave 7 / 2026-09-20）槽位绑定解析。它提取 `ModelCatalog` 里预设的各插槽（strong, cheap 等）推荐。
+ * 这些槽位的解析是为了填充用户的偏好模型选择界面。
+ * @returns 定义的不同档位推荐的模型配置。
+ */
 export function catalogSlots(): SlotPins {
 	const slots = effectiveSettings().models;
 	const pins = {} as SlotPins;
@@ -120,6 +147,10 @@ export function catalogSlots(): SlotPins {
  *  plain-key model provider (core/auth-keys.ts's pi-ai-derived table),
  *  with keyPresent read env-wins through the keys seam, fresh per call —
  *  saving a key immediately federates the provider into the picker. */
+/**
+ * 获取可用的所有提供商信息，并按其显示顺序排序。用于配置页面的渲染。
+ * @returns 提供商列表。
+ */
 export function catalogProviders(): CatalogProvider[] {
 	return AUTH_PROVIDER_KEYS.map((p) => ({
 		id: p.id,
@@ -136,6 +167,11 @@ function keyedProviderIds(): Set<string> {
 }
 
 /** Project one catalog model to the client DTO. */
+/**
+ * 将底层的 `Model` 引擎配置转为用于传输和在 UI 渲染的简单 DTO（数据传输对象）格式。
+ * @param model 需要转换的模型。
+ * @returns 扁平化且包含显示标识信息的模型 DTO。
+ */
 export function toModelDto(model: Model<Api>): ModelDto {
 	return {
 		id: model.id,
@@ -162,6 +198,11 @@ export function toModelDto(model: Model<Api>): ModelDto {
  *  and the activity feed (observability.ts) resolves job limits
  *  server-side through this. No hardcoded fallback exists anywhere:
  *  a model missing here reads limit-null (usage-only, honest render). */
+/**
+ * 解析并生成当前配置中各模型到其支持的最大上下文长度的映射。
+ * 这被用来在上下文压缩等模块中计算安全阀值。
+ * @returns 返回字典: `${provider}:${model_id}` -> Context limit tokens。
+ */
 export function catalogContextLimits(): Map<string, number> {
 	const keyed = keyedProviderIds();
 	const index = new Map<string, number>();
@@ -178,6 +219,11 @@ export function catalogContextLimits(): Map<string, number> {
  *  (sorted by provider then id — stable, diff-friendly) + the config
  *  defaults a settings-less chat runs + the background roles' resolved
  *  pins (the settings UI's per-role default captions). */
+/**
+ * 用于 GET /api/models 接口的主函数。
+ * 聚合当前的 `ModelCatalog`、提供商列表、各个等级角色插槽（SlotPins）、以及默认配置。
+ * @returns 包括分类列表、提供商以及推荐信息的全量模型配置目录。
+ */
 export function modelCatalog(): ModelCatalogResponse {
 	const keyed = keyedProviderIds();
 	const models = piModels()
@@ -206,6 +252,12 @@ export type SettingsValidation =
  *  - thinkingLevel: must be in the resolved model's supported list —
  *    the model the picker writes against (settings.model, else config's
  *    prober/teacher pin; one controller, so the two specs share it). */
+/**
+ * 验证独立聊天会话覆盖（ChatSettings）中的自定义模型配置。
+ * 检查模型是否有效存在于图录中，是否支持当前会话的指定思考等级（thinkingLevel）。
+ * @param settings 包含自定义模型配置的聊天设置对象。
+ * @returns 如果一切合法则 ok 为 true，否则包含详细的报错原因及修正（cleared）建议。
+ */
 export function validateChatSettings(settings: ChatSettings): SettingsValidation {
 	const providers = piModels().getProviders().map((p) => p.id);
 	if (settings.model) {
@@ -226,6 +278,13 @@ export function validateChatSettings(settings: ChatSettings): SettingsValidation
 	return { ok: true };
 }
 
+/**
+ * 验证全局模型偏好配置（ModelsSettings）里的各类插槽绑定（如 strong/cheap/vision）。
+ * 遍历每一项检查模型有效性及思考级别的支持性。如果有不支持的高级思考模型被指定，
+ * 返回的对象会包含错误以及被自动降级的 `cleared` 配置建议。
+ * @param settings 全局模型设置（包含各槽位的映射）。
+ * @returns 验证成功或失败信息，及修正后的 settings 拷贝。
+ */
 export function validateModelsSettings(settings: ModelsSettings): SettingsValidation {
 	for (const name of MODEL_SLOTS) {
 		const slot = settings[name];
@@ -273,6 +332,12 @@ function clampLevelFor(provider: string, id: string, level: ThinkingLevel): Thin
  *  thinkingLevel clamps against THE SLOT'S OWN model (the parser requires
  *  a model on every slot write — owner, 2026-09-22). Pure: catalog in,
  *  clamped section out; the route applies it after validation. */
+/**
+ * 自动修正并钳制全局模型配置中不兼容的 thinkingLevel 级别（将不支持级别降为其兼容级别，或者 null）。
+ * 在发生后台 API 提供商变更或支持变更时可以调用它清洗旧的配置。
+ * @param settings 当前的模型设置。
+ * @returns 修改（如果需要）兼容后的新模型设置。
+ */
 export function clampModelsLevels(settings: ModelsSettings): ModelsSettings {
 	const out: ModelsSettings = {};
 	for (const name of MODEL_SLOTS) {
@@ -294,6 +359,12 @@ export function clampModelsLevels(settings: ModelsSettings): ModelsSettings {
  *  slot (the conversation chain's fallback — what a settings-less chat
  *  would run). No model anywhere → rides unchecked (runtime clamps at
  *  engine build; the turn gate refuses the model-less chat anyway). */
+/**
+ * 自动修正并钳制当前对话中独立的模型配置。
+ * @param settings 聊天级别设置。
+ * @param strong 对应回退/默认的 strong 槽位（用于当聊天覆盖配置为空时的参考）。
+ * @returns 调整后的兼容版本。
+ */
 export function clampChatLevel(settings: ChatSettings, strong: EffectiveSlot | null): ChatSettings {
 	if (settings.thinkingLevel === undefined) return settings;
 	const provider = settings.model?.provider ?? strong?.provider;

@@ -65,11 +65,18 @@ import { ToolCallIdUniquifier } from "./call-ids.ts";
 
 /** The wire event: a pi AgentEvent (with our slim message_update — see the
  * WIRE DIET note above), or one of the two app events. */
+/**
+ * 前端流式通讯接口上的回合内网络事件定义。
+ * 这个类型主要用来从后端同步生成中的部分状态。为了减少线缆（wire）通信负担，去掉了冗余封装。
+ */
 export type TurnWireEvent =
 	| AgentEvent
 	| { type: "message_update"; message: AgentMessage }
 	| { type: "error"; errorText: string };
 
+/**
+ * 启动和运行后端 Agent 回合所需的配置规范。
+ */
 export interface PiTurnSpec {
 	/** The per-turn agent (stateless engine — built from the record). */
 	agent: Agent;
@@ -96,6 +103,9 @@ export interface PiTurnSpec {
 
 /** One view onto a running turn: push() replays/streams an event, done()
  *  terminates the view ([DONE] + close). Cheap to be a Set member. */
+/**
+ * Agent 回合流事件订阅者的接口约束（视图附加在此，用于接收事件并写入底层 HTTP stream）。
+ */
 export interface PiTurnSubscriber {
 	push(event: TurnWireEvent): void;
 	done(): void;
@@ -105,6 +115,11 @@ export interface PiTurnSubscriber {
  *  runs the agent decoupled from any single HTTP response and owns the
  *  in-memory event log + the live subscriber set. The POST response and
  *  the reattach stream are both subscribers onto it. */
+/**
+ * 代表一个服务端独立在后台运行的回合句柄 (handle)。
+ * - 该回合可以独立于单个 HTTP 响应独立运行；
+ * - 它自己维护在内存中的事件日志和活动订阅者集合，允许迟延的客户端（或者网络中断的客户端）恢复连接后回放和接收。
+ */
 export interface PiTurnHandle {
 	/** A fresh subscriber stream: FULL replay of the log, then live events
 	 *  until the turn settles (ending [DONE]). Cancelling it detaches the
@@ -116,6 +131,17 @@ export interface PiTurnHandle {
 	abort(): void;
 }
 
+/**
+ * 启动并运行一个 Agent 生成回合，返回其实例句柄。
+ * 该方法封装了核心的循环机制（agent.continue()），并将 Pi Agent 事件：
+ * 1. 经过 ID 去重器重构。
+ * 2. 精简和合并为网络格式 `TurnWireEvent`，推送到内部日志和缓冲队列中。
+ * 3. 并发派发给目前附着（attach）在该句柄上的所有活跃 SSE 订阅者。
+ * 回合自然结束（或中止或错误）后将调用 `onFinish` 回调触发落地等收尾逻辑。
+ *
+ * @param spec 生成该回合所需的配置和钩子。
+ * @returns 用于读取该回合进度或中止该回合的操作句柄 `PiTurnHandle`。
+ */
 export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	const { agent, onError, onFinish, usedToolCallIds, updateFlushMs = 100 } = spec;
 	const uniquifier = usedToolCallIds ? new ToolCallIdUniquifier(usedToolCallIds) : undefined;
@@ -326,6 +352,13 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 /** The subscriber-shaped SSE response — the POST /api/chat response and
  * GET /api/chats/[id]/stream are BOTH this: same headers, same wire
  * dialect, one protocol for the client to consume. */
+/**
+ * 将某个后台的回合句柄（handle）封装为针对客户端标准 SSE `text/event-stream` 格式的 Response。
+ * 这个函数被 POST /api/chat 的初次提交和 GET /api/chats/[id]/stream 的断线重连共用。
+ *
+ * @param handle 用于订阅的代理后台实例。
+ * @returns HTTP 响应流对象。
+ */
 export function piTurnResponse(handle: PiTurnHandle): Response {
 	return new Response(handle.subscribe(), {
 		headers: {

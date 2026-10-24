@@ -27,10 +27,21 @@ import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TO
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
+/**
+ * 校验解析请求体的结果类型，封装成功时带回的泛型实体对象以及失败时的错误描述。
+ */
 export type SettingsBodyResult<T> =
 	| { ok: true; settings: T }
 	| { ok: false; error: string };
 
+/**
+ * 解析并校验来自请求体的独立会话配置（ChatSettings）。
+ * 它负责验证传入 JSON 结构，并确保 `model` 及 `thinkingLevel` 字段满足应用所需的合法性约束。
+ * (旧版未包含在 models 节点下的内容会按向下兼容被解析)。
+ *
+ * @param body 待解析的 JSON 格式未知载荷。
+ * @returns 验证成功返回包含设置的成功结果，否则返回具体的错误信息。
+ */
 export function parseSettingsBody(body: unknown): SettingsBodyResult<ChatSettings> {
 	if (!body || typeof body !== "object" || Array.isArray(body)) {
 		return { ok: false, error: "Invalid JSON body" };
@@ -76,6 +87,14 @@ function asRecord(body: unknown): Record<string, unknown> | null {
 }
 
 /** general: { autoUpdate?: boolean } */
+/**
+ * 解析并校验基础/全局配置项（GeneralSettings）。
+ * 包括：`autoScroll`（自动滚动开关）和 `titleGeneration`（由模型驱动的智能标题生成开关及触发时间）。
+ * 由于是全量替换接口，未传递的键等同于被清除（使用出厂默认值）。
+ *
+ * @param body 待解析的请求体载荷。
+ * @returns 验证成功或失败的解析结果。
+ */
 export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<GeneralSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -134,6 +153,13 @@ function parseBooleanMap(value: unknown, field: string): { map?: Record<string, 
 /** agent: { models?, tools?, prompts? } — model/thinking validity against
  *  the catalog is checked by the route (validateChatSettings discipline);
  *  prompt switch-on membership is checked by the route (needs the store). */
+/**
+ * 解析并校验有关模型 Agent 行为机制的相关配置项（AgentSettings）。
+ * 包括了用于多工具调用的全局限流、重试机制、以及控制代理能够使用哪些外围工具（如图谱和搜索）。
+ *
+ * @param body 待校验的请求体。
+ * @returns 解析得到的安全合法的 AgentSettings 对象结果。
+ */
 export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -209,6 +235,14 @@ function parseHexOrNull(value: unknown, field: string): { color?: string | null;
 
 /** appearance: { mode?, background?, fontFamily?, proseFontSize?,
  *  sessionNameSerif?, mdRendering? } */
+/**
+ * 解析并校验应用外观样式的偏好设置项（AppearanceSettings）。
+ * 处理的字段包括：亮暗模式 (`mode`)、背景色 (`background`)、字体 (`fontFamily`)、
+ * 字号 (`proseFontSize`)，以及Markdown富文本渲染中特殊元素的自定义颜色和加粗设置。
+ *
+ * @param body 需要校验的载荷。
+ * @returns 成功或失败包裹的外观设置项。
+ */
 export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<AppearanceSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -282,6 +316,14 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
  *  rungs and the BYOK embeddingModel died with the provider embedder
  *  (clustering is the free birth-session partition, labels are session
  *  names). Old-shape keys in a body are ignored, not rejected. */
+/**
+ * 解析并校验与知识图谱功能相关的偏好配置（GraphSettings）。
+ * 当前由于经过了架构精简合并（Wave 7 / 2026-09-23），这部分主要只保留主控开关（enabled）、
+ * 渲染开关（rendering）以及提取模块切分大小时需要的预算数（extractionChunkTokens）。
+ *
+ * @param body 要解析的请求数据体。
+ * @returns 验证合法后的 `GraphSettings` 结果。
+ */
 export function parseGraphSettingsBody(body: unknown): SettingsBodyResult<GraphSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -324,6 +366,14 @@ export function parseGraphSettingsBody(body: unknown): SettingsBodyResult<GraphS
  *  present-but-empty slot object is rejected (absent slot = unset; say
  *  what you mean). Catalog validity is checked by the route
  *  (validateChatSettings discipline). */
+/**
+ * 解析全局模型档位插槽（ModelsSettings）。
+ * 将传递的模型指定参数（strong / cheap / vision 等插槽）验证并组装。
+ * 这保证了系统始终使用 BYOK（Bring Your Own Key）并且明确声明底层使用的 `provider` 与 `model`。
+ *
+ * @param body 需要解析的插槽定义配置体。
+ * @returns 验证合法后的模型档位设置。
+ */
 export function parseModelsSettingsBody(body: unknown): SettingsBodyResult<ModelsSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -355,6 +405,14 @@ export function parseModelsSettingsBody(body: unknown): SettingsBodyResult<Model
  *  smaller threshold would re-summarize the tail it just wrote). Absent =
  *  factory default 150k at resolution. Replace-whole, like every
  *  section. */
+/**
+ * 解析与长期记忆合并压缩（Compaction）关联的配置。
+ * 允许用户设置触发展开模型对过长对话历史执行内容提取重写的 Token 预算阈值（thresholdTokens）。
+ * 这个预算数有着严格防抖动的下限（防止不断重复触发）。
+ *
+ * @param body 需要解析的请求载荷。
+ * @returns 解析合规的结果包装体。
+ */
 export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<CompactionSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -377,6 +435,10 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 
 /** The section→parser map for PUT /api/settings/[section] (the route also
  *  carries the special prompts sub-resource). */
+/**
+ * 将不同的设置分类段落映射到对应的安全解析验证器。
+ * 这一映射由后端的 `PUT /api/settings/[section]` 路由直接驱动，以确保存储更新安全性。
+ */
 export const SETTINGS_SECTIONS = {
 	general: parseGeneralSettingsBody,
 	chat: parseSettingsBody,

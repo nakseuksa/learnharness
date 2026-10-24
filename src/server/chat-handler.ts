@@ -137,6 +137,12 @@ function resolveEngine(role: ModelRole): PiEngine | undefined {
 setJobRespawn((jobId) => void jobRunner.runJob(jobId));
 
 /** The route-facing entry: parse {chatId, input} and run one turn. */
+/**
+ * 处理针对特定聊天会话的 HTTP 请求入口（POST /api/chat）。
+ * @param req 传入的 HTTP 请求对象，预期包含要提交的聊天内容或交互类型。
+ * @param buildAgent 能够用来构建 AI Agent 的选项工厂函数，一般仅测试使用。
+ * @returns 包含操作结果的响应对象（例如成功状态、或验证/权限错误）。
+ */
 export async function handleChatRequest(
 	req: Request,
 	buildAgent?: (opts: AgentBuildOptions & { teaching: boolean }) => TeachingAgent,
@@ -165,6 +171,15 @@ export async function handleChatRequest(
  * The turn composition: one input event → native record appends → one
  * agent turn as a background object. Also the wake pipeline's entry
  * (TurnInput's steer kind appends the marker under the same claim).
+ */
+/**
+ * 处理解析后的聊天输入，更新对话上下文，并触发 AI 代理回合。此方法是单次对话回合构建核心。
+ * 将单一的输入事件转换为原生的对话记录添加，然后在后台作为独立对象运行 Agent 回合。
+ * 这也是后台作业(Wake pipeline)调度的入口。
+ * @param chatId 对话会话的唯一标识符。
+ * @param input 解析并验证后的输入负载（例如用户发言、后台操控 steer 标记等）。
+ * @param buildAgent 能够用来构建 AI Agent 的选项工厂函数，一般仅测试使用。
+ * @returns 若正常启动则返回代表成功的 Response，或者若遇并发冲突或未配置模型时返回对应错误响应。
  */
 export async function handleChatInput(
 	chatId: string,
