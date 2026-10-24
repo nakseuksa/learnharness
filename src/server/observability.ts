@@ -1,22 +1,20 @@
 /**
- * Server-side observability surface — the barrel-approved exports the
- * transport layer (app/api/*) reads for background-process status.
+ * 服务器端可观测性（observability）表面 — barrel 批准的导出项，
+ * 供传输层（app/api/*）读取后台进程状态。
  *
- * THE ACTIVITY FEED (2026-09 observability design): the bottom-right dock is
- * visible in every view, so it needs the complete running-process picture —
- * sub-agent jobs across ALL chats (not just the open one) plus the global
- * extraction runs — in one poll. The dock is BACKGROUND PROCESSES ONLY
- * (user decision, 2026-09-11): teaching sessions already have their own
- * observability, so in-flight teacher turns are deliberately NOT in the
- * feed. /api/jobs stays chat-scoped untouched: it is the transcript
- * machinery's poll and carries turnInFlight for the re-attach seam
- * (chat-transport); the dock is a different consumer with a different
- * shape, served here. Single sources of truth are unchanged: the job
- * store and the pipeline registry — this file only composes them.
+ * 活动流（THE ACTIVITY FEED，2026-09 可观测性设计）：右下角的 dock 在
+ * 每个视图中都可见，因此它需要在一个轮询中获取完整的正在运行的进程图景 —
+ * 跨所有聊天（不仅是打开的那个）的子代理作业（sub-agent jobs）加上全局
+ * 提取运行。dock 仅显示后台进程（BACKGROUND PROCESSES ONLY，
+ * 用户决定，2026-09-11）：教学会话已经有它们自己的可观测性，因此
+ * 飞行中的教师回合故意不在流中。/api/jobs 保持聊天作用域不变：它是转录
+ * 机制的轮询，并携带 turnInFlight 用于重新附加接缝（chat-transport）；
+ * dock 是一个不同形状的不同消费者，在这里提供服务。单一事实来源保持不变：
+ * 作业存储和管道注册表 — 此文件仅组合它们。
  *
- * The extraction side of the dock's controls also surfaces here:
- * abortExtraction (true mid-run cancellation, user-decided) is exported
- * from the pipeline's module for the abort route to call.
+ * dock 控件的提取侧也在这里表面化：
+ * abortExtraction（真正的运行中取消，用户决定）从管道的模块中导出，
+ * 供中止路由调用。
  */
 
 import { extractionStatuses, type ExtractionPhase } from "../agent/subagents/extraction.ts";
@@ -29,22 +27,24 @@ import type { JobRecord } from "../core/contracts.ts";
 export { abortExtraction, extractionStatuses, type ExtractionPhase, type RunningExtraction } from "../agent/subagents/extraction.ts";
 export { chatStore } from "../store/chats.ts";
 
-/** A running sub-agent job, joined with its chat's title for the dock.
- *  contextLimit (context-meter amendment, owner 2026-09-23): the model's
- *  live catalog limit, resolved SERVER-SIDE from pi's catalog — the dock
- *  reads it off the feed instead of any client-side table. Null when the
- *  model is missing from the catalog (the blob then renders no context
- *  line — never a fake window). */
+/**
+ * 正在运行的子代理作业，连接其聊天标题供 dock 使用。
+ * contextLimit（context-meter amendment, owner 2026-09-23）：模型的
+ * 实时目录限制，从 pi 的目录在服务器端（SERVER-SIDE）解析 — dock
+ * 从信息流中读取它，而不是任何客户端表。当模型在目录中缺失时为 null
+ * （此时 blob 不呈现上下文行 — 绝不是假窗口）。
+ */
 export interface ActivityJob extends JobRecord {
 	title: string;
 	contextLimit: number | null;
 }
 
-/** One extraction-pipeline JOB (title joined), oldest first. Per-chunk
- *  jobs (owner, 2026-09-28): a multi-chunk source owns SEVERAL rows — id
- *  is the unique job key (source id, or "src#i"), chatId stays the SOURCE
- *  id (abort + chat links are source-scoped), and the title carries the
- *  "· i/N" part suffix. */
+/**
+ * 一个提取管道作业（连接了标题），最旧的优先。每块作业（Per-chunk jobs，
+ * owner，2026-09-28）：一个多块源拥有多行 — id 是唯一的作业键
+ * （源 id，或 "src#i"），chatId 保持为源（SOURCE）id（中止 + 聊天链接是源作用域的），
+ * 并且标题带有 "· i/N" 部分后缀。
+ */
 export interface ActivityExtraction {
 	id: string;
 	chatId: string;
@@ -54,18 +54,18 @@ export interface ActivityExtraction {
 	startedAt: number;
 }
 
-/** The dock's whole world in one payload: every running process, every view.
- *  Jobs are RUNNING-ONLY — finished jobs belong to their chat's transcript;
- *  the blob disappears when the process ends. Cost math is NOT done here:
- *  raw usage rides on the records and the client folds it with the pure
- *  helpers in core/prices.ts (transport stays thin). */
-/** The dock's whole world + the graph's version stamp (wave 6 session
- *  deletion): the payload carries graphRevision (max mtime across the
- *  graph data files — see server/graph.ts) so any view can detect "the
- *  graph changed underneath me" (a merge landed, a deletion purged) and
- *  refetch clusters/layout. Reads never move it; the DELETE response
- *  returns the same stamp. */
 /**
+ * 在一个有效负载中包含 dock 的整个世界：每个正在运行的进程，每个视图。
+ * 作业仅限于运行中（RUNNING-ONLY） — 完成的作业属于它们聊天的转录；
+ * 当进程结束时，blob 消失。成本数学不在（NOT）这里进行：原始使用量
+ * 附在记录上，客户端使用 core/prices.ts 中的纯助手（pure helpers）
+ * 对其进行折叠（传输层保持纤薄）。
+ *
+ * dock 的整个世界 + 图谱的版本戳（wave 6 会话删除）：有效负载携带
+ * graphRevision（跨图谱数据文件的最大 mtime — 见 server/graph.ts），
+ * 因此任何视图都可以检测到“我底下的图谱改变了”（合并落盘，删除清除）并
+ * 重新获取集群/布局。读取永远不会移动它；DELETE 响应返回相同的时间戳。
+ *
  * 组装后台活动大盘的聚合负载数据（供 `/api/activity` 端点读取）。
  * 这里汇总了所有正在运行的“子代理作业 (jobs)”和“提取任务 (extractions)”，
  * 并且附加了最新的图谱版本戳（`graphRevision`）用于前端判定是否需要刷新知识图谱。
@@ -94,16 +94,15 @@ export function activityFeed(): {
 		id: run.part ? `${run.chatId}#${run.part.i}` : run.chatId,
 		chatId: run.chatId,
 		part: run.part,
-		// The run's own label never reaches this feed (unlike the graph
-		// status route) — the chat store's title, or the bare id for notes
-		// sources, plus the chunk suffix when the source fanned out.
+		// 运行自己的标签永远不会到达此信息流（与图谱状态路由不同）
+		// — 聊天存储的标题，或笔记源的裸 id，加上当源散开（fanned out）时的块后缀。
 		title:
 			(run.label ?? chatStore.getChat(run.chatId)?.title ?? run.chatId) +
 			(run.part ? ` · ${run.part.i}/${run.part.n}` : ""),
 		phase: run.phase,
 		startedAt: run.startedAt,
 	}));
-	// oldest-first on last activity: the stable blob order (ISO strings sort chronologically)
+	// 按最后活动时间最旧优先：稳定的 blob 顺序（ISO 字符串按时间顺序排序）
 	jobs.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
 	return {
 		jobs,

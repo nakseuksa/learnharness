@@ -1,39 +1,34 @@
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 
 /**
- * TOOL-CALL ID UNIQUIFICATION (owner-approved fix, 2026-10-04 — the Lacan
- * incident): some providers (DeepSeek via OpenRouter, observed live) return
- * tool-call ids that reset every response — `call_0`, `call_1`, … — so a
- * one-call-per-turn session names EVERY call `call_0`. Everything in this
- * app keys on toolCallId (the view fold's call↔result join, the pending-
- * question gate, answer routing, the option-shuffle seed), so cross-turn
- * duplicates corrupted all of them at once: the fold applied the quiz
- * answer to the ASK card, the ask question vanished, the order scrambled.
+ * 工具调用 ID 唯一化（TOOL-CALL ID UNIQUIFICATION，owner 批准的修复，2026-10-04 — Lacan 事件）：
+ * 一些提供商（通过 OpenRouter 的 DeepSeek，实时观察到）返回的工具调用 id
+ * 在每次响应时都会重置 — `call_0`, `call_1`, … — 因此一个每回合一次调用的
+ * 会话将每个（EVERY）调用都命名为 `call_0`。此应用中的所有内容都以
+ * toolCallId 为键（视图折叠的 call↔result 连接、挂起问题门控、答案路由、
+ * 选项洗牌种子），因此跨回合的重复项同时破坏了所有这些：折叠将测验答案
+ * 应用于 ASK 卡片，询问问题消失，顺序混乱。
  *
- * THE LAW: ids are uniquified ONCE, at the wire boundary — this class sits
- * inside runPiTurn, sees every AgentEvent before any view, and applies the
- * same minting at settlement. The client, the persisted record, the dock,
- * the answer flow, and the next turn's provider context (rebuilt from the
- * record) all see exactly one set of unique ids. Provider context stays
- * internally paired (call and result rewrite together), which the
- * OpenAI-compatible APIs accept — pi itself synthesizes ids for providers
- * that return none, so arbitrary-but-paired ids are already protocol-legal.
- * History is NEVER rewritten: record messages pass through untouched, and
- * pre-fix duplicate records heal at the fold (view.ts pairs results
- * newest-first).
+ * 法则（THE LAW）：id 在线路边界处唯一化一次（ONCE） — 此类位于
+ * runPiTurn 内部，在任何视图之前看到每个 AgentEvent，并在结算时应用
+ * 相同的铸造。客户端、持久化记录、dock、答案流以及下一个回合的提供商
+ * 上下文（从记录重建）都正好看到一组唯一的 id。提供商上下文在内部
+ * 保持配对（call 和 result 一起重写），OpenAI 兼容的 API 接受这一点 —
+ * pi 本身会为不返回任何 id 的提供商合成 id，因此任意但配对的 id
+ * 在协议上已经是合法的。历史记录从不（NEVER）被重写：记录消息原样通过，
+ * 修复前重复的记录在折叠处愈合（view.ts 将结果从最新开始配对）。
  *
- * SCHEME: a per-chat seen-set (seeded from the record at turn start) plus
- * per-message tables. Streaming messages carry NO id (ids are stamped at
- * persist), so tables key by OBJECT IDENTITY — the message_end event's
- * object is reference-identical to the object in agent.state.messages
- * (verified against pi-agent-core), and a WeakMap joins the two. A fresh
- * table (epoch) opens at each assistant message_start; the update/end
- * objects of that message attach to it; mints claim once per message, so
- * the same id in a SECOND message of the turn (a retry step) gets its own
- * mint. Colliding ids become `${orig}~2`, `~3`, … skipping used ones.
+ * 方案（SCHEME）：一个每个聊天的 seen-set（在回合开始时从记录中播种）
+ * 加上每个消息的表。流式消息不携带（NO）id（id 在持久化时打上标记），
+ * 因此表按对象身份（OBJECT IDENTITY）键入 — message_end 事件的对象与
+ * agent.state.messages 中的对象引用相同（已针对 pi-agent-core 验证），
+ * 并且一个 WeakMap 将两者连接起来。在每个助手 message_start 时打开一个
+ * 新的表（epoch）；该消息的 update/end 对象附加到它上面；每次消息
+ * 声明一次铸造，因此回合的第二条消息（重试步骤）中的相同 id 会获得
+ * 自己专属的铸造。碰撞的 id 变为 `${orig}~2`, `~3`, … 跳过已使用的。
  */
 
-/** Structurally walk any message's content for tool-call blocks. */
+/** 在结构上遍历任何消息的内容以查找工具调用块。 */
 function callBlocks(message: unknown): Array<{ id: string } & Record<string, unknown>> {
 	const content = (message as { content?: unknown } | undefined)?.content;
 	if (!Array.isArray(content)) return [];
@@ -43,10 +38,10 @@ function callBlocks(message: unknown): Array<{ id: string } & Record<string, unk
 	);
 }
 
-/** The ids every consumer may already have seen: all call ids and result
- *  ids in a message list (the chat record — including its legacy dupes,
- *  which is the point: membership is what drives minting). */
 /**
+ * 每个消费者可能已经看到的 id：消息列表中的所有调用 id 和结果 id
+ * （聊天记录 — 包括其旧的重复项，这就是重点：成员资格是驱动铸造的因素）。
+ *
  * 遍历给定的对话记录列表，收集已出现的所有工具调用 ID (Tool Call IDs)。
  * 这是为了在去重器初始化时，将其置入 seen 集合，从而保证历史记录不会与当前生成回合的重复 ID 发生冲突。
  *
@@ -75,20 +70,23 @@ export function collectToolCallIds(messages: readonly unknown[]): string[] {
  */
 export class ToolCallIdUniquifier {
 	private readonly seen = new Set<string>();
-	/** assistant message object → its (origId → uniqueId) table. Weak: the
-	 *  agent's turn dies at settle; nothing here outlives it. */
+	/**
+	 * 助手消息对象 → 它的 (origId → uniqueId) 表。弱引用（Weak）：
+	 * 代理的回合在结算时死亡；这里没有任何东西比它活得长。
+	 */
 	private readonly tables = new WeakMap<object, Map<string, string>>();
-	/** The current assistant message's table — opened at its message_start,
-	 *  shared by its update/end objects, and the resolution scope for its
-	 *  tool_execution events (which fire after its message_end but before
-	 *  the next message_start). */
+	/**
+	 * 当前助手消息的表 — 在其 message_start 处打开，由其 update/end 对象共享，
+	 * 并且是其 tool_execution 事件（在 message_end 之后但在下一个
+	 * message_start 之前触发）的解析范围。
+	 */
 	private epoch: Map<string, string> | null = null;
 
 	constructor(usedIds: Iterable<string>) {
 		for (const id of usedIds) this.seen.add(id);
 	}
 
-	/** Keep `orig` if never used; otherwise mint an unused `${orig}~n`. */
+	/** 如果从未使用过则保留 `orig`；否则铸造一个未使用的 `${orig}~n`。 */
 	private claim(orig: string): string {
 		if (!this.seen.has(orig)) {
 			this.seen.add(orig);
@@ -103,17 +101,17 @@ export class ToolCallIdUniquifier {
 		}
 	}
 
-	/** Register + rewrite one message's tool-call blocks (idempotent across
-	 *  the repeated partials of message_update). Returns a cloned message
-	 *  when any id changed, else the original object. */
+	/**
+	 * 注册 + 重写一条消息的工具调用块（在 message_update 的重复片段中是幂等的）。
+	 * 当任何 id 改变时返回克隆的消息，否则返回原始对象。
+	 */
 	private remapMessageContent(message: unknown): unknown {
 		if ((message as { role?: string }).role !== "assistant") return message;
 		const blocks = callBlocks(message);
 		if (blocks.length === 0) return message;
 
-		// Attach to the current epoch unless this object already has a table
-		// (a re-emitted update/end). A message event with no open epoch
-		// (defensive: a stream that skips message_start) opens one.
+		// 附加到当前的 epoch，除非该对象已经有一个表（重新发出的 update/end）。
+		// 没有打开的 epoch 的消息事件（防御性：跳过 message_start 的流）会打开一个。
 		let table = this.tables.get(message as object);
 		if (!table) {
 			table = this.epoch ?? new Map();
@@ -140,15 +138,16 @@ export class ToolCallIdUniquifier {
 		return changed ? { ...(message as object), content } : message;
 	}
 
-	/** Every AgentEvent, ids uniquified. Structural and total: unknown
-	 *  event shapes pass through untouched. */
+	/**
+	 * 每个 AgentEvent，id 都被唯一化。结构性的和总体的：
+	 * 未知的事件形状原封不动地通过。
+	 */
 	event(event: AgentEvent): AgentEvent {
 		switch (event.type) {
 			case "message_start": {
 				const e = event as { message: { role?: string } };
-				// A new assistant message opens a fresh epoch — this is what
-				// keeps a retried id in a LATER message from reusing the
-				// earlier message's mint.
+				// 新的助手消息会开启一个新的 epoch — 这可以防止以后（LATER）
+				// 消息中重试的 id 重用早期消息的铸造。
 				if (e.message?.role === "assistant") this.epoch = new Map();
 				return this.remapEventMessage(event);
 			}
@@ -192,12 +191,12 @@ export class ToolCallIdUniquifier {
 		return { ...(event as object), message: remapped } as AgentEvent;
 	}
 
-	/** The settle seam: the agent's final state, rewritten to the ids the
-	 *  wire already showed. Only THIS turn's messages rewrite (the ones
-	 *  registered by their event objects); prior-turn history — including
-	 *  legacy duplicate-id records — passes through verbatim. Tool results
-	 *  pair with the most recent registered assistant message (the loop's
-	 *  own structure: results follow their calls). */
+	/**
+	 * 结算接缝（settle seam）：代理的最终状态，重写为线路已经显示的 id。
+	 * 只有这（THIS）个回合的消息才会被重写（那些由其事件对象注册的消息）；
+	 * 前一回合的历史 — 包括旧的重复 id 记录 — 逐字通过。工具结果
+	 * 与最近注册的助手消息配对（循环自身的结构：结果紧随其调用之后）。
+	 */
 	remapSettled(messages: readonly unknown[]): unknown[] {
 		let scope: Map<string, string> | undefined;
 		return messages.map((m) => {
@@ -205,7 +204,7 @@ export class ToolCallIdUniquifier {
 			if (role === "assistant") {
 				const table = this.tables.get(m as object);
 				if (!table) {
-					// Prior-turn or unregistered: history is never rewritten.
+					// 前一回合或未注册的：历史从不被重写。
 					scope = undefined;
 					return m;
 				}

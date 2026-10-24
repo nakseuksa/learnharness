@@ -1,58 +1,44 @@
 /**
- * THE WAKE PIPELINE (contracts.ts "THE ASYNC PROTOCOL" §4) — server-side
- * steer delivery for finished sub-agent jobs. Wave C (2026-09-26):
- * delivery rides pi's OWN follow-up queue when a run is live, and the
- * idle wake otherwise. One registry, two vehicles.
+ * 唤醒管道（THE WAKE PIPELINE，contracts.ts "THE ASYNC PROTOCOL" §4）—
+ * 已完成的子代理作业（sub-agent jobs）的服务器端操控交付（steer delivery）。
+ * Wave C（2026-09-26）：当运行处于活动状态时，交付乘坐 pi 自己的后续队列，
+ * 否则使用空闲唤醒（idle wake）。一个注册表，两种工具。
  *
- *   deliverJobResult(steer) — the runner calls this on job completion.
- *     The steer joins a per-chat serialized registry and the pump drives
- *     it along ONE of two paths:
+ *   deliverJobResult(steer) — 运行器在作业完成时调用它。
+ *     操控加入每个聊天的序列化注册表，泵（pump）将其沿着两条路径之一驱动：
  *
- *       1. LIVE RUN → pi steering: the marker is handed to the LIVE
- *          agent's steering queue (agent.steer). pi polls that queue at
- *          TURN BOUNDARIES — after a completed assistant message AND its
- *          tool results (never between a toolCall and its result), and
- *          again at the run's start (a continuation drains the queue
- *          BEFORE its first LLM call) — and CONTINUES THE SAME RUN: the
- *          marker joins the context mid-lesson, rides the live event
- *          stream (message_start/message_end), and lands in the record
- *          at that run's persist. This is the owner's 2026-09-26
- *          correction: a real lesson is one continuous teach→quiz→teach
- *          loop, so delivery must happen BETWEEN messages inside the
- *          run — waiting for the run to stop (follow-ups) only ever
- *          fires at a stopper exit, which is exactly when it must not.
- *          The question stopper runs BEFORE the post-turn poll and
- *          exits the loop, so a quiz-terminated run never injects: the
- *          handed marker strands (see settleSteers) and waits — the
- *          ANSWER run then picks it up at its start poll. probe-handoff
- *          markers NEVER take this path (owner ruling: the handoff must
- *          start the TEACHER's run — a record-level branch only a fresh
- *          wake can make).
- *       2. IDLE WAKE: no live turn. WAIT FOR IDLE (turn-liveness OR a
- *          dangling question — an unanswered client-side tool call breaks
- *          provider conversion), then fire ONE server-side wake turn
- *          carrying EVERY queued marker as its input appends (write-ahead
- *          persist, liveness, extraction — one code path, the same
- *          composition as a client request). A 409 means a client turn
- *          raced in — re-queue and retry with backoff. Idempotent per
- *          jobId (steerDelivered): a crashed wake or a duplicate deliver
- *          is skipped, not duplicated.
+ *       1. 实时运行（LIVE RUN） → pi steering：标记被传递给实时（LIVE）
+ *          代理的操控队列（agent.steer）。pi 在回合边界（TURN BOUNDARIES）轮询该队列 —
+ *          在完成的助手消息及其工具结果之后（从不在 toolCall 及其结果之间），
+ *          并在运行开始时再次轮询（延续（continuation）在其第一次 LLM 调用之前排空队列）
+ *          — 并继续相同的运行（CONTINUES THE SAME RUN）：标记在课程中途加入上下文，
+ *          乘坐实时事件流（message_start/message_end），并在该运行的持久化时落在记录中。
+ *          这是 owner 的 2026-09-26 修正：真正的课程是一个连续的 teach→quiz→teach
+ *          循环，因此交付必须发生在运行内部的消息之间 — 等待运行停止（后续）只会在
+ *          停止器出口（stopper exit）触发，而这正是它绝不能发生的时候。
+ *          问题停止器在回合后轮询之前运行并退出循环，因此以测验终止的运行从不注入：
+ *          交付的标记滞留（见 settleSteers）并等待 — 然后答案（ANSWER）运行在其
+ *          开始轮询时将其拾取。探测移交（probe-handoff）标记从不走这条路径（owner ruling：
+ *          移交必须启动老师（TEACHER）的运行 — 一个只有新的唤醒才能做出的记录级分支）。
+ *       2. 空闲唤醒（IDLE WAKE）：没有实时回合。等待空闲（WAIT FOR IDLE）
+ *          （回合活跃度或悬而未决的问题 — 未回答的客户端工具调用会破坏提供商转换），
+ *          然后触发一个服务器端唤醒回合，携带每个排队的标记作为其输入追加
+ *          （预写持久化、活跃度、提取 — 单一代码路径，与客户端请求相同的组合）。
+ *          409 意味着客户端回合抢先了 — 重新排队并使用退避（backoff）重试。
+ *          按 jobId 幂等（steerDelivered）：崩溃的唤醒或重复交付会被跳过，而不是重复。
  *
- *   settleSteers(chatId, persisted) — the handler calls this at turn
- *     settlement (after unregisterLiveAgent): entries the run DELIVERED
- *     resolve + flip their jobs; entries that were handed to the dying
- *     run but never injected (stopper exit, abort, a missed final poll)
- *     return to pending and the pump restarts — no stranding, no loss.
+ *   settleSteers(chatId, persisted) — 处理程序在回合结算时调用它
+ *     （在 unregisterLiveAgent 之后）：运行交付（DELIVERED）的条目
+ *     解析 + 翻转它们的作业；传递给垂死运行但从未注入的条目（停止器出口、中止、
+ *     错过的最后轮询）返回到待处理（pending），泵重新启动 — 没有滞留，没有丢失。
  *
- *   Crash recovery (recoverStaleJobs): a process restart can orphan jobs —
- *     "running" with a result (the wake never fired) or without one (the
- *     sub-agent loop itself died). The sweep re-delivers finished results
- *     (idempotently) and re-spawns unfinished loops, both via injected
- *     seams. It runs lazily off the /api/jobs poll, throttled.
+ *   崩溃恢复（Crash recovery，recoverStaleJobs）：进程重启可能会使作业孤立 —
+ *     具有结果的“running”（唤醒从未触发）或没有结果的“running”
+ *     （子代理循环本身死了）。扫描重新交付完成的结果（幂等地）并重新生成未完成的
+ *     循环，两者都通过注入的接缝（injected seams）。它懒惰地运行在 /api/jobs 轮询上，受限流控制。
  *
- * All mutable state lives on globalThis (the turn-liveness lesson: Next dev
- * gives each route entry its own module instances — a module-level Map would
- * be a different object in each).
+ * 所有可变状态都驻留在 globalThis 上（回合活跃度教训：Next dev 给每个路由入口自己
+ * 的模块实例 — 模块级 Map 在每个实例中将是一个不同的对象）。
  */
 
 import {
@@ -70,46 +56,52 @@ import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import type { Agent } from "@earendil-works/pi-agent-core";
 
-/** Fires one server-side teacher turn: (chatId, input) → HTTP-ish status.
- *  Wave C: the input is the IDLE WAKE — every queued marker as the turn's
- *  input appends (the handler appends them natively under the wake's own
- *  turn claim; one composition for every turn). */
+/**
+ * 触发一个服务器端教师回合：(chatId, input) → HTTP-ish 状态。
+ * Wave C：输入是空闲唤醒（IDLE WAKE） — 每个排队的标记作为回合的输入追加
+ * （处理程序在唤醒自己的回合声明下原生追加它们；每个回合一个组合）。
+ */
 export type TurnRunner = (chatId: string, input: TurnInput) => Promise<number>;
 
-/** Re-runs a job's sub-agent loop (crash recovery for orphaned jobs). */
+/** 重新运行作业的子代理循环（孤立作业的崩溃恢复）。 */
 export type JobRespawn = (jobId: string) => void;
 
 interface QueuedSteer {
 	steer: SteerMessage;
 	resolve: () => void;
 	reject: (reason: Error) => void;
-	/** The live agent this marker was steered into (agent.steer) — set by
-	 *  the hand-off helper. Guards double-handoff (a re-pumped loop or a
-	 *  re-registered run must not re-queue what a run already holds) and is
-	 *  CLEARED at settlement for markers the dying run never injected. */
+	/**
+	 * 此标记被操控进入的实时代理（agent.steer） — 由移交助手设置。
+	 * 防止双重移交（重新泵送的循环或重新注册的运行绝不能重新排队运行已持有的内容），
+	 * 并在垂死运行从未注入的标记结算时被清除（CLEARED）。
+	 */
 	handedTo?: Agent;
 }
 
 interface WakeState {
 	turnRunner?: TurnRunner;
 	respawn?: JobRespawn;
-	/** chatId → steers awaiting delivery, in arrival order. The single
-	 *  delivery registry (Wave C: the agent's own follow-up queue is a
-	 *  per-run VEHICLE, not the registry — settlement reconciles here). */
+	/**
+	 * chatId → 等待交付的操控，按到达顺序。单一交付注册表
+	 * （Wave C：代理自己的后续队列是每个运行的工具（VEHICLE），
+	 * 而不是注册表 — 结算在这里调和）。
+	 */
 	queues: Map<string, QueuedSteer[]>;
-	/** chatId → user-steered messages awaiting drain (composer steering,
-	 *  2026-10-03). Same deliver-or-requeue lifecycle as job markers: the
-	 *  live agent's steering queue is the VEHICLE, this is the registry —
-	 *  a steer stranded behind a question or an abort stays parked here
-	 *  and rides the chat's NEXT run (handOffEligible). */
+	/**
+	 * chatId → 等待排空的用户操控消息（合成器操控，2026-10-03）。
+	 * 与作业标记相同的交付或重新排队生命周期：实时代理的操控队列是工具（VEHICLE），
+	 * 这是注册表 — 滞留在问题或中止之后的操控会停泊在这里，
+	 * 并乘坐聊天的下一次运行（handOffEligible）。
+	 */
 	userSteers: Map<string, UserSteerEntry[]>;
-	/** chatId → the agent of the CURRENTLY streaming turn (cleared at
-	 *  settlement, before settleSteers). The pump's live path hands
-	 *  markers to this agent's follow-up queue. */
+	/**
+	 * chatId → 当前正在流式传输回合的代理（在结算时，settleSteers 之前被清除）。
+	 * 泵的实时路径将标记交给此代理的后续队列。
+	 */
 	liveAgents: Map<string, Agent>;
-	/** Chats whose pump loop is currently active (serialization per chat). */
+	/** 其泵循环当前处于活动状态的聊天（每个聊天序列化）。 */
 	pumping: Set<string>;
-	/** Throttle bookkeeping for the stale-job sweep. */
+	/** 过期作业扫描的限流簿记。 */
 	lastSweepAt: number;
 }
 
@@ -142,46 +134,41 @@ export function setJobRespawn(respawn: JobRespawn): void {
 }
 
 const POLL_MS = 400;
-/** After the gates open, wait a beat before firing — a client that just
- *  answered a question is about to send its continuation; don't 409 it.
+/**
+ * 大门打开后，等待一拍再触发 — 刚回答问题的客户端即将发送其延续；不要返回 409。
  *
- *  Evidence for 750: the race window is exactly the learner's answer→POST
- *  flight — sendAutomaticallyWhen dispatches synchronously on addToolOutput,
- *  the answer hits the record only at the write-ahead persist, and beginTurn
- *  flips the turn registry immediately after, all before the grace can fire
- *  (measured localhost RTT ~10ms; typical LAN/production RTT <300ms). 750ms
- *  is 2.5× the worst realistic flight. A miss self-heals: the pump rechecks
- *  the gates after the grace AND the wake pipeline retries 409s with a
- *  backoff ramp — and since the transport's merge-retry (chat-transport.ts)
- *  made client 409s non-fatal, even a pathological RTT degrades gracefully.
- *  (Was 1500 — pure guess; 750 claws back 750ms of post-answer delivery
- *  latency without weakening the guard.) */
+ * 750 的证据：竞争窗口正是学习者的 answer→POST 飞行时间 —
+ * sendAutomaticallyWhen 在 addToolOutput 时同步调度，答案仅在
+ * 预写持久化时命中记录，并且 beginTurn 紧接着翻转回合注册表，所有这些都在宽限期
+ * 触发之前完成（测量的 localhost RTT ~10ms；典型的 LAN/生产环境 RTT <300ms）。
+ * 750ms 是最差实际飞行时间的 2.5 倍。未命中会自我修复：泵在宽限期后重新检查
+ * 大门，并且唤醒管道使用退避斜坡重试 409 — 而且由于传输的合并重试
+ * （chat-transport.ts）使得客户端 409 变得非致命，即使是病态的 RTT 也能优雅降级。
+ * （曾是 1500 — 纯粹的猜测；750 收回了 750ms 的回答后交付延迟，而没有削弱防护。）
+ */
 const GRACE_MS = 750;
-/** 409 backoff: capped ramp so a busy client can't spin the pump. */
+/** 409 退避：有上限的斜坡，这样繁忙的客户端就不会让泵空转。 */
 const RETRY_BACKOFF_MS = [500, 1000, 2000, 5000] as const;
 
 function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** The job a steer belongs to, if it is a job steer (result/abort);
- *  probe-handoff steers have no job — null. */
+/** 操控所属的作业，如果它是一个作业操控（结果/中止）；探测移交操控没有作业 — 为 null。 */
 function jobIdOf(steer: SteerMessage): string | null {
 	const details = steer.details as { jobId?: string } | undefined;
 	return typeof details?.jobId === "string" ? details.jobId : null;
 }
 
-/** Dock bookkeeping: the marker reached the learner's view — flip its job
- *  NOW instead of waiting for the delivering turn to settle. Called from
- *  BOTH visibility seams: the marker's message_end wire event (live steer
- *  injection — the card is on screen while the teacher keeps teaching) and
- *  the write-ahead persist in handleChatInput (the wake's input appends —
- *  the card is durable in the record). The registry's delivery promise
- *  still settles via settleSteers / the runner-200 path; finalizeJob is
- *  idempotent, so the later flip is a no-op. Owner ruling (2026-09-26): a
- *  delivered subagent leaves the background dock the moment its result is
- *  visible, not when the teacher's turn ends. */
 /**
+ * Dock 簿记：标记到达了学习者的视图 — 现在（NOW）翻转其作业，而不是等待
+ * 交付的回合结算。从两个（BOTH）可见性接缝调用：标记的 message_end 线路事件
+ * （实时操控注入 — 老师继续教学时卡片在屏幕上）和 handleChatInput 中的预写持久化
+ * （唤醒的输入追加 — 卡片在记录中是持久的）。注册表的交付承诺仍然通过
+ * settleSteers / runner-200 路径结算；finalizeJob 是幂等的，因此后面的翻转是无操作。
+ * Owner ruling (2026-09-26): 交付的子代理在其结果可见的那一刻离开后台 dock，
+ * 而不是在老师的回合结束时。
+ *
  * 标记特定 steer（来自后台任务的结果）已向用户可见，即已被渲染。
  * 此时就可以把关联的任务状态从 "running" 转换为 "done/failed"。
  * @param steer 操控消息。
@@ -190,22 +177,22 @@ export function noteSteerVisible(steer: SteerMessage): void {
 	finalizeSteer(steer);
 }
 
-/** Finalize a delivered steer's job bookkeeping — job steers only. */
+/** 完成已交付操控的作业簿记 — 仅限作业操控。 */
 function finalizeSteer(steer: SteerMessage): void {
 	const jobId = jobIdOf(steer);
 	if (jobId) finalizeJob(jobId);
 }
 
-/** Fail a steer's job on unrecoverable delivery failure — job steers only. */
+/** 在不可恢复的交付失败时使操控的作业失败 — 仅限作业操控。 */
 function failSteer(steer: SteerMessage, err: Error): void {
 	const jobId = jobIdOf(steer);
 	if (jobId) failJob(jobId, err);
 }
 
-/** Queue ANY steer (result, abort, probe handoff) through the pipeline.
- *  Resolves when the wake turn has completed; rejects when delivery fails
- *  unrecoverably. Never rejects for queueing itself. */
 /**
+ * 通过管道排队任何（ANY）操控（结果、中止、探测移交）。
+ * 当唤醒回合完成时 resolve；当交付不可恢复地失败时 reject。永远不会因为排队本身而 reject。
+ *
  * 将后台任务的结果（打包成 SteerMessage）投递给对应的聊天对话。
  * 该函数负责排队投递请求，然后启动队列泵处理这些操控消息（或者递交给活跃运行的回合，或者作为独立回合驱动）。
  * @param steer 包含任务结果和目标关联信息的操控消息。
@@ -222,14 +209,13 @@ export function deliverJobResult(steer: SteerMessage): Promise<void> {
 	});
 }
 
-/** Hand every eligible pending marker to a live agent's steering queue
- *  (idempotent per agent via handedTo). Called from BOTH the pump's live
- *  path and registerLiveAgent — a parked marker (stranded behind a quiz)
- *  must not wait for the pump loop to notice the new run: the handler
- *  registers the answer run's agent BEFORE runPiTurn, so this hand-off
- *  beats the loop's synchronous start-poll drain and the marker rides the
- *  run's FIRST LLM call (the native equivalent of the old continuation
- *  coalescing). */
+/**
+ * 将每个符合条件的待处理标记交给实时代理的操控队列（通过 handedTo 对每个代理幂等）。
+ * 从泵的实时路径和 registerLiveAgent 两者（BOTH）调用 — 停泊的标记（滞留在测验之后）
+ * 绝不能等待泵循环注意到新的运行：处理程序在 runPiTurn 之前（BEFORE）注册答案运行的代理，
+ * 因此此移交在循环的同步 start-poll 排空之前完成，标记乘坐该运行的第一次 LLM 调用
+ * （旧延续合并的本机等效物）。
+ */
 function handOffEligible(chatId: string, agent: Agent): void {
 	const queue = state().queues.get(chatId);
 	if (queue && queue.length > 0) {
@@ -255,13 +241,12 @@ function handOffEligible(chatId: string, agent: Agent): void {
 	}
 }
 
-/** The chat-handler registers the CURRENTLY STREAMING turn's agent BEFORE
- *  runPiTurn (the loop's start steering-poll drains synchronously inside
- *  that call — a later registration would miss it). Pending registry
- *  markers are steered into the run right here. The settle seam cannot
- *  beat the registration: settlement needs a streamed response, which
- *  never happens inside the constructor call. */
 /**
+ * chat-handler 在 runPiTurn 之前（BEFORE）注册当前正在流式传输（CURRENTLY STREAMING）
+ * 回合的代理（循环开始的 steering-poll 在该调用内同步排空 — 后面的注册将错过它）。
+ * 待处理的注册表标记就在这里被引导到运行中。结算接缝无法击败注册：结算需要流式响应，
+ * 这永远不会在构造函数调用内发生。
+ *
  * 注册一个正在当前会话中运行的活跃 Agent 实例。
  * 这样就可以将排队的操控消息（Steer）实时递交给它，而无需等待它结束。
  * @param chatId 会话 ID。
@@ -272,23 +257,22 @@ export function registerLiveAgent(chatId: string, agent: Agent): void {
 	handOffEligible(chatId, agent);
 }
 
-/** A parked user steer: the message plus the agent it was last handed to
- *  (the double-handoff guard — a reconcile keeps it only when its id
- *  never landed in the persisted record). */
+/**
+ * 停泊的用户操控：消息加上它最后一次交接的代理（双重移交防护 — 调和过程仅在其
+ * id 从未落在持久化记录中时才保留它）。
+ */
 export interface UserSteerEntry {
 	message: LhMessage;
 	handedTo?: Agent;
 }
 
-/** The steer route's live hand-off (composer steering, 2026-10-03).
- *  Synchronous by design — no interleaving between the live-agent check
- *  and the queue() means a settling turn can never race the hand-off.
- *  Returns false when no turn is live: the caller 409s and the client
- *  falls back to a plain text send (the settle race). The registry copy
- *  is the stranding safety net: if this agent dies undelivered (question
- *  termination, abort), reconcileUserSteers keeps it parked for the
- *  chat's next run. */
 /**
+ * 操控路由的实时移交（合成器操控，2026-10-03）。
+ * 设计为同步 — 实时代理检查和 queue() 之间没有交错意味着结算回合永远无法与移交竞争。
+ * 当没有回合处于活动状态时返回 false：调用者返回 409，客户端回退到纯文本发送（结算竞争）。
+ * 注册表副本是滞留安全网：如果此代理在未交付时死亡（问题终止、中止），
+ * reconcileUserSteers 会将其保留为该聊天下一次运行的停泊状态。
+ *
  * 用户主动发送的新鲜内容，尝试动态投递给正在运行的对话 Agent。
  * 如果存在支持 Composer（合成器）机制的活跃 Agent，它将消耗这个消息并返回 true。
  * @param chatId 目标对话会话 ID。
@@ -307,11 +291,12 @@ export function steerLiveChat(chatId: string, message: LhMessage): boolean {
 	return true;
 }
 
-/** TURN SETTLEMENT RECONCILIATION for user steers: delivered ids drop
- *  (the record holds them); undelivered stay parked for the next run.
- *  Memory-only by design (same tradeoff as job markers): a server
- *  restart drops parked steers — and the whole turn dies with it anyway. */
 /**
+ * 用户操控的回合结算调和（TURN SETTLEMENT RECONCILIATION）：已交付的 id 丢弃
+ * （记录保留它们）；未交付的保留停泊等待下一次运行。
+ * 设计上仅限内存（与作业标记相同的权衡）：服务器重启会丢弃停泊的操控 —
+ * 无论如何，整个回合都会随之死亡。
+ *
  * 调和用户端的 steer 数据：当活跃回合结束且消息被持久化后，检查哪些用户投递的
  * steer 真正落盘了，清理已送达的条目，未送达的保留在队列供下次重试。
  * @param chatId 会话 ID。
@@ -326,9 +311,10 @@ export function reconcileUserSteers(chatId: string, persisted: readonly LhMessag
 	else state().userSteers.set(chatId, kept);
 }
 
-/** Clear the live agent at settlement — MUST run before settleSteers so the
- *  reconciliation's re-pump can never hand a marker to the dying agent. */
 /**
+ * 在结算时清除实时代理 — 必须在 settleSteers 之前运行，这样调和过程的
+ * 重新泵送绝不会将标记交给垂死的代理。
+ *
  * 注销当前活跃运行的 Agent。在回合结束或者因错误崩溃时调用。
  * @param chatId 会话 ID。
  */
@@ -336,20 +322,19 @@ export function unregisterLiveAgent(chatId: string): void {
 	state().liveAgents.delete(chatId);
 }
 
-/** TURN SETTLEMENT RECONCILIATION (Wave C): the handler calls this AFTER
- * unregisterLiveAgent, with the run's persisted messages. Two jobs:
- *
- *   - entries whose marker the run DELIVERED (in-run follow-up injection —
- *     their ids are in the persisted slice) resolve and flip their jobs;
- *   - entries handed to the dying run but never injected (the question
- *     stopper exited before the follow-up poll; an abort; a delivery that
- *     raced the final poll) return to PENDING (handedTo cleared) and the
- *     pump restarts — the idle wake delivers them once the gates open.
- *
- * This is what makes the live hand-off safe: pi owns no retry for a marker
- * stranded in a settled agent's queue, so the registry stays the truth and
- * the dead agent's copy is simply abandoned (GC'd with the agent). */
 /**
+ * 回合结算调和（TURN SETTLEMENT RECONCILIATION，Wave C）：处理程序在
+ * unregisterLiveAgent 之后（AFTER）使用运行的持久化消息调用它。两项工作：
+ *
+ *   - 运行交付（DELIVERED）其标记的条目（运行中后续注入 — 它们的 id
+ *     在持久化切片中）解析并翻转它们的作业；
+ *   - 传递给垂死运行但从未注入的条目（问题停止器在后续轮询之前退出；中止；
+ *     与最终轮询竞争的交付）返回到待处理（PENDING，handedTo 被清除），并且
+ *     泵重新启动 — 大门打开后空闲唤醒交付它们。
+ *
+ * 这就是使实时移交安全的原因：pi 对于滞留在已结算代理队列中的标记没有重试机制，
+ * 因此注册表保持为事实，死代理的副本只是被丢弃（与代理一起 GC）。
+ *
  * 回合结束时的最终调和机制：它会对比投递队列中“已递交给上一个回合”的消息
  * 是否存在于新持久化的记录中。在记录中存在的会被标记完成；丢失的（如由于运行中断）
  * 则取消其递交标记，并重新唤醒 `pump` 处理它们。
@@ -377,41 +362,34 @@ export function settleSteers(chatId: string, persisted: { id?: string }[]): void
 	}
 }
 
-/** Result of an abort attempt — the endpoint maps these to HTTP. */
+/** 尝试中止的结果 — 端点将这些映射到 HTTP。 */
 export interface AbortOutcome {
 	ok: boolean;
 	reason?: "not_found" | "not_running";
 }
 
 /**
- * ABORT (2026-09 dock semantics, user-decided): real kill, error with
- * reason, the teacher still learns. The dock's END button reaches this
- * through POST /api/activity/abort (body {kind: "job", id: jobId}); the
- * route is master's thin composition — this is the job-side mechanism.
- * Four things happen, in order:
+ * 中止（ABORT，2026-09 dock 语义，用户决定）：真正的杀死，带原因的错误，老师仍在学习。
+ * dock 的 END 按钮通过 POST /api/activity/abort（body {kind: "job", id: jobId}）
+ * 访问这里；路由是 master 的精简组合 — 这是作业端（job-side）的机制。
+ * 按顺序发生四件事：
  *
- *   1. KILL the spend: fire the job's registered AbortController (the
- *      runner registered it at loop start) — the in-flight model call
- *      aborts, not just the next loop check. The runner unwinds silently
- *      (its catch checks abortSignal.aborted; finishJob checks status).
- *   2. DROP any queued result steer for this job (the delivering-result
- *      phase): resolve its entry without firing the wake. If the wake
- *      turn is ALREADY in flight (the pump shifted the entry), it's too
- *      late — the result steer lands, and the cancellation steer dedupes
- *      against it via steerDelivered (same jobId metadata).
- *   3. FLIP the record to error "Aborted by learner" immediately — the
- *      poll reflects the user's action at once (the user chose
- *      error-with-reason over a distinct cancelled status). finalizeJob
- *      never overwrites a non-running status, so the flip is terminal no
- *      matter what the wake does.
- *   4. STEER the teacher: a one-line abort note (buildAbortSteer) through
- *      the same wake pipeline, so the teacher's promise of a result
- *      doesn't hang silently in the lesson.
+ *   1. 杀死（KILL）花费：触发作业注册的 AbortController（运行器在循环开始时注册它）
+ *      — 飞行中的模型调用被中止，而不仅仅是下一次循环检查。运行器静默展开
+ *      （其 catch 检查 abortSignal.aborted；finishJob 检查状态）。
+ *   2. 丢弃（DROP）此作业的任何排队结果操控（正在交付结果的阶段）：
+ *      解析其条目而不触发唤醒。如果唤醒回合已经在飞行中（泵移动了条目），
+ *      为时已晚 — 结果操控落地，取消操控通过 steerDelivered（相同的 jobId 元数据）
+ *      对其进行去重。
+ *   3. 立即将记录翻转（FLIP）为错误 "Aborted by learner" — 轮询立即反映
+ *      用户的操作（用户选择了 error-with-reason 而不是独特的 cancelled 状态）。
+ *      finalizeJob 永远不会覆盖非运行状态，因此无论唤醒做什么，翻转都是最终的。
+ *   4. 引导（STEER）老师：通过相同的唤醒管道发送一条一行的中止说明（buildAbortSteer），
+ *      这样老师的结果承诺就不会在课程中静默挂起。
  *
- * The runner writes the usage folded so far in its finally (merge patch),
- * so an aborted job's money record survives the kill.
- */
-/**
+ * 运行器在其 finally 中写入到目前为止折叠的使用量（合并补丁），
+ * 因此被中止的作业的金钱记录能在杀死中幸存下来。
+ *
  * 用户发起主动中断（Abort）后台任务的请求处理函数。
  * 任务会被标记为 abort（这会自动终止任务底层的执行），如果该任务还没有结果，就产生一个 abort 类型的 steer 传递给对话。
  * @param jobId 要中断的任务 ID。
@@ -461,14 +439,13 @@ function chatIdOf(steer: SteerMessage): string {
 }
 
 /**
- * The per-chat pump: delivers the registry along pi's two native paths.
- * Only one loop per chat at a time; later arrivals ride the registry.
+ * 每个聊天的泵：沿着 pi 的两条本机路径交付注册表。
+ * 每个聊天一次只有一个循环；后来到达的乘坐注册表。
  *
- * Each iteration first clears dead weight (gone chat, already-delivered
- * markers), then picks the vehicle: a LIVE turn takes every eligible
- * marker via agent.followUp (the run continues at its own stop — nothing
- * more to do here until settlement re-pumps); otherwise the IDLE WAKE
- * fires ONE turn carrying every pending marker as its input appends.
+ * 每次迭代首先清除死重（消失的聊天、已交付的标记），然后选择载具：
+ * 实时（LIVE）回合通过 agent.followUp 获取每个符合条件的标记
+ * （运行在其自己的停止处继续 — 在结算重新泵送之前，这里没有更多可做的事情）；
+ * 否则，空闲唤醒（IDLE WAKE）触发一个回合，携带每个待处理的标记作为其输入追加。
  */
 async function pump(chatId: string): Promise<void> {
 	if (!chatId) return;
@@ -633,7 +610,7 @@ async function pump(chatId: string): Promise<void> {
 	}
 }
 
-/** Flip the job to its final status now that the lesson has resumed. */
+/** 现在课程已恢复，将作业翻转到其最终状态。 */
 function finalizeJob(jobId: string): void {
 	const job = stores.jobStore.getJob(jobId);
 	if (!job || job.status !== "running") return;
@@ -655,11 +632,9 @@ function failJob(jobId: string, err: Error): void {
 }
 
 /**
- * Wait until the chat can take a wake turn: no turn in flight AND no
- * unanswered question call (the record's dangling question — the answer
- * arrives as its tool result, and no turn may run in the window). Poll;
- * the learner may take arbitrarily long to answer, and that is correct —
- * the steer fires right after their answer turn completes.
+ * 等待直到聊天可以进行唤醒回合：没有飞行中的回合并且没有未回答的问题调用
+ * （记录中悬而未决的问题 — 答案作为其工具结果到达，在该窗口中不能运行任何回合）。
+ * 轮询；学习者可能需要任意长的时间来回答，这是正确的 — 操控在他们的回答回合完成之后立即触发。
  */
 async function waitForIdle(chatId: string): Promise<void> {
 	for (;;) {
@@ -686,20 +661,18 @@ async function waitForIdle(chatId: string): Promise<void> {
 const SWEEP_THROTTLE_MS = 30_000;
 
 /**
- * Lazy sweep (called off the /api/jobs poll, throttled), LIVENESS-GATED
- * (accuracy wave, 2026-09-19): a "running" record without a live loop
- * registration (subagents/aborts.ts) is an orphan of a process death —
- * re-deliver its stored result (idempotently) or re-spawn the loop, at
- * once (the old 15-minute age heuristic waited on ghosts AND re-ran
- * hung-but-alive loops beside themselves — the figure-maker incident,
- * 2026-09-18). A record WITH a live registration is provably executing
- * in THIS process — never touched, however old: a hung first model call
- * (zero usage ever billed) stays honestly "running" in the dock until
- * END kills it. The abort registration spans loop start to delivery
- * completion, so a live registration can never belong to a dead run.
+ * 懒惰扫描（在 /api/jobs 轮询中被调用，限流），活跃度门控（LIVENESS-GATED）
+ * （准确性 wave，2026-09-19）：一个没有实时循环注册（subagents/aborts.ts）的
+ * “运行中”记录是进程死亡的孤儿 — 立即重新交付其存储的结果（幂等地）或重新生成循环
+ * （旧的 15 分钟存活时间启发式方法会等待幽灵，并且在自身旁边重新运行挂起但存活的循环 —
+ * 图表制作器事件，2026-09-18）。带有实时注册的记录可证明正在此（THIS）进程中执行 —
+ * 无论多老都不去碰：挂起的第一次模型调用（从未计费）诚实地在 dock 中保持“运行中”，
+ * 直到 END 杀死它。中止注册跨越循环开始到交付完成，因此实时注册绝不可能属于死运行。
  */
-/** Re-run a job's sub-agent loop — exposed for the sweep's tests (the
- *  /api/jobs poll is its only production caller, disabled under NODE_ENV=test). */
+/**
+ * 重新运行作业的子代理循环 — 暴露给扫描的测试
+ * （/api/jobs 轮询是其唯一的生产调用者，在 NODE_ENV=test 下被禁用）。
+ */
 /**
  * 恢复过期的作业。该操作会被限流，并通过轮询端点定期被触发。
  * 它会识别 "running" 状态但实际上由于进程崩溃等原因死掉的任务，并尝试重新发起交付，或者利用 `respawn` 恢复任务的运行循环。
@@ -736,7 +709,7 @@ export function recoverStaleJobs(): void {
 	}
 }
 
-/** The /api/jobs entry: job list for the client poll (+ lazy recovery). */
+/** /api/jobs 入口：客户端轮询的作业列表（+ 懒惰恢复）。 */
 /**
  * 获取指定会话中的所有任务记录，为客户端 `/api/jobs` 端点服务。
  * （该函数也会懒触发一次 `recoverStaleJobs` 以尝试修复陈旧任务）

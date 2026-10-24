@@ -1,30 +1,23 @@
 /**
- * THE COMPACTION SERVICE (owner round 14, 2026-10-05): the trigger
- * plumbing around core/compaction's pure cuts and markers.
+ * 压缩服务（THE COMPACTION SERVICE，owner round 14，2026-10-05）：
+ * 围绕 core/compaction 的纯粹切割和标记的触发管道（trigger plumbing）。
  *
- * TOPOLOGY (why this is simple): question and problem poses TERMINATE
- * their runs, so the "user is thinking" pause is always a BETWEEN-RUNS
- * window. Compaction therefore never touches a live run:
+ * 拓扑结构（为什么这很简单）：提问（question）和问题（problem）提出会终止（TERMINATE）
+ * 它们的运行，因此“用户正在思考”的暂停始终是运行之间的窗口（BETWEEN-RUNS window）。
+ * 因此，压缩永远不会触碰实时运行（live run）：
  *
- *   - SETTLE KICK — a turn settles (onFinish, after persist) and the
- *     projected context is over threshold: the summary starts NOW, in
- *     the background, while the learner reads/answers — usually done
- *     long before the next input arrives.
- *   - TURN-START GATE — every turn (client POST or wake) awaits any
- *     in-flight compaction for its chat BEFORE appends or beginTurn;
- *     if the record is STILL over threshold (cold sessions, kicks that
- *     lost their engine), compaction runs synchronously inside the
- *     request. Structurally gated: nothing model-facing for the chat
- *     interleaves with a running compaction (owner ruling — minimal
- *     surface for anything to go wrong).
- *   - OVERFLOW RECOVERY — a run that dies on context length needs no
- *     special path: the next turn's gate compacts and the fresh run
- *     starts small.
+ *   - 结算踢出（SETTLE KICK） — 回合结算（onFinish，在持久化之后）且预计的上下文超过阈值：
+ *     摘要现在开始，在后台进行，与此同时学习者正在阅读/回答 — 通常在下一个输入到达之前很久就完成了。
+ *   - 回合开始门控（TURN-START GATE） — 每个回合（客户端 POST 或唤醒）都在追加或 beginTurn 之前
+ *     等待其聊天的任何飞行中（in-flight）压缩；如果记录仍然超过阈值（冷会话，失去引擎的踢出），
+ *     压缩会在请求内同步运行。结构性门控（Structurally gated）：聊天的任何面向模型的内容
+ *     都不会与正在运行的压缩交错（owner ruling — 将出错的表面积降至最低）。
+ *   - 溢出恢复（OVERFLOW RECOVERY） — 因上下文长度而死掉的运行不需要特殊路径：
+ *     下一个回合的门控会压缩，新的运行会从小开始。
  *
- * The summary is written by the session's OWN conversation model (owner
- * ruling) via the zero-tool one-shot sub-agent seam; its usage lands in
- * the chat's append-only turns log (the money channel) keyed by the
- * marker's id.
+ * 摘要由会话自己的对话模型（owner ruling）通过零工具（zero-tool）、一次性（one-shot）
+ * 子代理接缝（sub-agent seam）编写；其使用量（usage）落在聊天仅追加的回合日志（资金通道）中，
+ * 以标记的 id 为键。
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -49,17 +42,20 @@ import type { ChatStore } from "../core/ports.ts";
 import type { PiEngine } from "../agent/models.ts";
 import { runSubagent } from "../agent/subagents/pi-run.ts";
 
-/** The summarizer's system prompt — server-owned operational framing,
- *  not model-facing doctrine (buildCompactionPrompt carries the shape). */
+/**
+ * 摘要器的系统提示 — 服务器拥有的操作框架，而不是面向模型的教条
+ * （buildCompactionPrompt 携带了形状）。
+ */
 const SUMMARIZER_SYSTEM_PROMPT =
 	"You are the session-compaction summarizer for a tutoring agent. You receive the transcript span to summarize and write exactly the summary the instructions demand — nothing else, no preamble, no meta-commentary.";
 
-/** The one-shot summary call: zero tools, one turn, text out. The engine
- *  is the chat's own conversation engine (owner ruling: the session's
- *  model writes its own summary). Injectable for tests. */
+/**
+ * 一次性摘要调用：零工具，一回合，文本输出。引擎是聊天自己的对话引擎
+ * （owner ruling：会话的模型编写自己的摘要）。可用于测试注入。
+ */
 export type Summarizer = (prompt: string, engine: PiEngine) => Promise<{ summary: string; usage: Usage }>;
 
-/** The production summarizer over the sub-agent seam. */
+/** 基于子代理接缝的生产环境摘要器。 */
 async function subagentSummarizer(prompt: string, engine: PiEngine): Promise<{ summary: string; usage: Usage }> {
 	let usage: Usage = {
 		input: 0,
@@ -86,25 +82,29 @@ async function subagentSummarizer(prompt: string, engine: PiEngine): Promise<{ s
 	return { summary: text, usage };
 }
 
-/** Everything the service needs from its host (chat-handler wires the
- *  production versions; tests inject). */
+/**
+ * 服务从其主机需要的所有内容（chat-handler 连接生产版本；测试注入）。
+ */
 export interface CompactionDeps {
 	chatStore: ChatStore;
-	/** The chat's conversation engine — also the summarizer's. */
+	/** 聊天的对话引擎 — 也是摘要器的。 */
 	engine: PiEngine;
-	/** provider:id of the engine (usage + marker provenance). */
+	/** 引擎的 provider:id（使用量 + 标记出处）。 */
 	modelId: string;
-	/** The session kind (summarizer wording: tutor vs practice). */
+	/** 会话类型（摘要器措辞：tutor vs practice）。 */
 	kind: "teach" | "practice" | "probe";
-	/** The effective trigger threshold, RESOLVED by the caller:
-	 *  min(settings threshold, contextWindow − reserve) — the owner's
-	 *  effective-trigger ruling. The catalog window lookup is the
-	 *  caller's (chat-handler has the model id at hand). */
+	/**
+	 * 实际触发阈值，由调用者解析（RESOLVED）：
+	 * min(设置阈值, contextWindow − reserve) — owner 的有效触发规则。
+	 * 目录窗口查找是调用者的（chat-handler 手头有模型 id）。
+	 */
 	thresholdTokens: number;
-	/** The composed system prompt's token estimate (chars/4) — the
-	 *  projection the provider actually receives starts with it. */
+	/**
+	 * 组合的系统提示的 token 估计值（字符数/4）—
+	 * 提供商实际接收到的投影以它开始。
+	 */
 	systemPromptTokens: number;
-	/** Injectable summarizer (tests); default = the sub-agent one-shot. */
+	/** 可注入的摘要器（测试用）；默认 = 子代理的一次性调用。 */
 	summarize?: Summarizer;
 }
 
@@ -118,9 +118,9 @@ function state(): CompactionState {
 	return (g.__lhCompaction ??= { inFlight: new Map() });
 }
 
-/** Is a compaction running for this chat? (The client status event's
- *  server-side twin — tests and the SSE emitter read it.) */
 /**
+ * 此聊天是否正在运行压缩？（客户端状态事件的服务器端孪生兄弟 — 测试和 SSE 发射器读取它。）
+ *
  * 检查指定会话是否正在后台执行上下文压缩（汇总）操作。
  * @param chatId 会话的唯一标识符。
  * @returns 若该会话的压缩任务正在运行中则返回 true，否则返回 false。
@@ -129,9 +129,10 @@ export function compactionInFlight(chatId: string): boolean {
 	return state().inFlight.has(chatId);
 }
 
-/** Await any in-flight compaction for the chat — the structural gate
- *  every model interaction for the chat passes through. */
 /**
+ * 等待聊天的任何飞行中（in-flight）压缩 —
+ * 聊天的每个模型交互都要通过的结构门。
+ *
  * 等待指定会话的后台压缩任务完成（若存在）。
  * 如果该会话有正在运行的压缩任务，函数将挂起并每隔 100ms 轮询直到任务完成。
  * @param chatId 会话的唯一标识符。
@@ -143,9 +144,9 @@ export async function awaitCompaction(chatId: string): Promise<void> {
 
 // ─── the effective threshold (owner ruling: min(setting, window − reserve)) ─
 
-/** Resolve the effective trigger. Unknown window → the setting alone
- *  (honest: no fake window — the catalog-index precedent). */
 /**
+ * 解析有效触发器。未知窗口 → 仅使用设置（诚实：没有假窗口 — 目录索引先例）。
+ *
  * 计算实际生效的上下文压缩阈值（Token 数）。
  * 优先使用用户设置的阈值，如果未设置，则根据所用模型的上下文窗口大小降级计算：
  * 如果模型上下文未提供，则回退至硬编码的 `COMPACTION_THRESHOLD_DEFAULT` (150k)。
@@ -162,17 +163,15 @@ export function effectiveThresholdTokens(settingTokens: number | undefined, cont
 
 // ─── the estimate over the ACTIVE projection ────────────────────────────────
 
-/** The projected context estimate: what the next LLM call would carry.
- *  THE TRIGGER LAW (pi's, verified 2026-10-05): anchor on the last
- *  assistant message's provider-reported usage — it already counted
- *  the system prompt, tool declarations, and the provider's own
- *  tokenizer — and chars/4-estimate ONLY messages appended after it.
- *  estimateContextTokens refuses anchors that predate a compaction
- *  marker (that usage described context the next request will NOT
- *  carry), so the fallback path runs the plain heuristic over the
- *  CUT-HONORED projection (never the dropped span) plus the additive
- *  prompt term the anchor would have covered. */
 /**
+ * 预计的上下文估计：下一次 LLM 调用将携带的内容。
+ * 触发法则（THE TRIGGER LAW，pi's，verified 2026-10-05）：锚定在最后一条
+ * 助手消息的提供商报告使用量上 — 它已经计算了系统提示、工具声明和提供商
+ * 自己的分词器 — 并且仅对追加在它之后的消息进行 chars/4 估计。
+ * estimateContextTokens 拒绝早于压缩标记的锚点（该使用量描述了下一个请求
+ * 不会携带的上下文），因此回退路径对 CUT-HONORED 投影（从不是丢弃的跨度）
+ * 运行纯粹的启发式方法，加上锚点原本会覆盖的附加提示项。
+ *
  * 估算给定消息历史记录中的总 Token 数。
  * 粗略估算规则为：将所有消息的内容、角色、调用以及工具返回的文本转换为字符串，长度除以 4。
  * 加上预估的系统提示词 Token 数，从而决定是否需要进行上下文压缩。
@@ -188,10 +187,10 @@ export function projectedContextTokens(messages: readonly LhMessage[], systemPro
 
 // ─── the compaction run ─────────────────────────────────────────────────────
 
-/** Run one compaction for the chat (the registry mutex is HELD by the
- *  caller — ensureCompacted). Reads the record fresh, cuts, summarizes,
- *  appends the marker, records usage, notifies. Never throws upward
- *  past the registry cleanup. */
+/**
+ * 为聊天运行一次压缩（注册表互斥锁由调用者持有 — ensureCompacted）。
+ * 重新读取记录，切割，总结，追加标记，记录使用量，通知。永远不会向上抛出异常超过注册表清理。
+ */
 async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 	const record = deps.chatStore.getChat(chatId);
 	if (!record) return;
@@ -283,12 +282,10 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 }
 
 /**
- * The gate + trigger in one: await any in-flight compaction, then — if
- * the record is STILL over threshold — run one synchronously (the
- * caller's request waits; the owner's structural-gate ruling). Idempotent
- * under concurrency through the registry mutex.
- */
-/**
+ * 门控 + 触发器合二为一：等待任何飞行中（in-flight）的压缩，然后 — 如果
+ * 记录仍然超过阈值 — 同步运行一个（调用者的请求等待；owner 的结构门规则）。
+ * 通过注册表互斥锁在并发下是幂等的。
+ *
  * 保证当前会话上下文已经被压缩。
  * 如果该会话已经有一个正在进行的压缩任务，该函数会等待其完成。
  * 若没有，且估算的 Token 超过阈值，则会立即在当前线程上启动压缩。
@@ -316,14 +313,11 @@ export async function ensureCompacted(deps: CompactionDeps, chatId: string): Pro
 }
 
 /**
- * The settle kick (fire-and-forget): the turn settled, the learner is
- * about to read/answer — if the projection is over threshold, the
- * summary starts NOW and finishes inside the pause. Wired at
- * chat-handler's onFinish tail; engineless or over-threshold-nothing
- * are silent no-ops. The next turn's ensureCompacted gate picks up
- * whatever this leaves running.
- */
-/**
+ * 结算踢出（触发即忘）：回合已结算，学习者即将阅读/回答 — 如果投影超过阈值，
+ * 摘要现在开始，并在暂停期间完成。在 chat-handler 的 onFinish 尾部连接；
+ * 无引擎或超过阈值但无内容是静默的无操作。下一个回合的 ensureCompacted 门控
+ * 会接管这里留下的任何运行。
+ *
  * 触发后台上下文压缩。
  * 如果当前上下文超过了 Token 阈值，并且当前没有正在运行的压缩任务，
  * 就会在后台生成一个异步任务进行汇总合并。如果依赖不足或无需压缩，则无操作。

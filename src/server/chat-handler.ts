@@ -55,22 +55,20 @@ import { steerDelivered } from "../core/contracts.ts";
 import type {CallUsage, SteerMessage} from "../core/contracts.ts";
 
 /**
- * One chat turn over the server-owned native record. Framework-free (plain
- * Request/Response) so tests can drive it directly with a scripted faux
- * engine — the Next route handler in app/api/chat is a one-line wrapper.
+ * 基于服务器拥有的原生记录的单个聊天回合（One chat turn）。无框架依赖（纯
+ * Request/Response），因此测试可以使用脚本伪造引擎直接驱动它 — app/api/chat
+ * 中的 Next 路由处理程序只是一个单行包装器。
  *
- * THE INPUT-EVENTS CONTRACT (Wave B, owner ruling 2026-09-26): POST /api/chat
- * carries {chatId, input} — one explicit event (text / answer / verdict /
- * continue), never a client transcript. The server owns the record; this
- * module is the TURN COMPOSITION ROOT: it turns the event into native
- * record appends (core/input-events.ts), builds the agent from the record
- * (the record IS the agent state — state.messages = record.messages,
- * continue()), and runs the turn as a background object (pi/ui-stream.ts).
- * Wake-pipeline steers ride the same composition (TurnInput's steer kind).
+ * 输入事件契约（THE INPUT-EVENTS CONTRACT，Wave B，owner ruling 2026-09-26）：POST /api/chat
+ * 携带 {chatId, input} — 一个明确的事件（文本 / 回答 / 裁决 / 继续），从不是客户端转录。
+ * 服务器拥有该记录；此模块是 回合组合根（TURN COMPOSITION ROOT）：它将事件转换为原生
+ * 记录追加（core/input-events.ts），从记录构建代理（记录即是代理状态（agent state） —
+ * state.messages = record.messages，continue()），并作为后台对象运行该回合（pi/ui-stream.ts）。
+ * 唤醒管道（Wake-pipeline）操控（steers）运行在同一个组合上（TurnInput 的 steer 种类）。
  *
- * THE SAME COMPOSITION serves both entry points: client requests and the
- * wake pipeline's server-side steers (src/server/jobs.ts) — one code path
- * for write-ahead persistence, turn liveness, and the turn services.
+ * 相同的组合（THE SAME COMPOSITION）服务于两个入口点：客户端请求和唤醒管道的
+ * 服务器端操控（src/server/jobs.ts）— 为预写持久化（write-ahead persistence）、回合活跃度（turn liveness）
+ * 和回合服务提供单一代码路径。
  */
 
 const jobRunner = createJobRunner({
@@ -95,9 +93,10 @@ const jobRunner = createJobRunner({
 	// same signal so keyless servers never see the research tool at all.
 	searchProvider,
 });
-/** The app's ONE extraction pipeline instance — both front doors share it:
- *  quiz-triggered session runs (turn-service) and notes imports
- *  (/api/graph/import) hit the same single-flight registry. */
+/**
+ * 应用程序的唯一提取管道（extraction pipeline）实例 — 两个前门共享它：
+ * 测验触发的会话运行（turn-service）和笔记导入（/api/graph/import）命中同一个单一飞行注册表（single-flight registry）。
+ */
 export const extraction = createExtractionPipeline({
 	...stores,
 	// BYOK (owner, 2026-09-22): the extraction stages resolve the chain —
@@ -114,10 +113,9 @@ export const extraction = createExtractionPipeline({
 });
 
 
-// Wake-pipeline wiring (contracts.ts "THE ASYNC PROTOCOL" §4): the pipeline
-// delivers its steers through THIS composition root (one event: the steer
-// marker, appended natively under the turn claim), and crash recovery
-// re-spawns orphaned sub-agent loops through THIS runner.
+// 唤醒管道连线（Wake-pipeline wiring，contracts.ts "THE ASYNC PROTOCOL" §4）：管道
+// 通过此组合根交付其操控（steers）（一个事件：操控标记（steer marker），在回合声明下原生追加），
+// 并且崩溃恢复（crash recovery）通过此运行器重新生成（re-spawns）孤立的子代理（sub-agent）循环。
 setTurnRunner(async (chatId, input) => {
 	const res = await handleChatInput(chatId, input);
 	// Drive the stream to completion server-side — nobody else will read it,
@@ -125,10 +123,12 @@ setTurnRunner(async (chatId, input) => {
 	await res.arrayBuffer().catch(() => undefined);
 	return res.status;
 });
-/** The settings-resolved engine for one role — BYOK (owner, 2026-09-22):
- *  the chain (role override → slot → NOTHING) may end empty, and undefined
- *  flows through to the per-need refusal gates (runner/extraction), read
- *  FRESH so a settings PUT between dispatch and spawn lands. */
+/**
+ * 为一个角色（role）解析设置的引擎 — BYOK (owner, 2026-09-22)：
+ * 链（角色覆盖（role override） → 槽位（slot） → NOTHING）可能以空结束，undefined
+ * 流经按需拒绝门控（per-need refusal gates，runner/extraction），每次 FRESH 读取，
+ * 使得调度（dispatch）和生成（spawn）之间的设置 PUT 得以生效。
+ */
 function resolveEngine(role: ModelRole): PiEngine | undefined {
 	const spec = resolveRoleSpec(role, stores.settingsStore.readSettings());
 	return spec ? piEngineForSpec(spec) : undefined;
@@ -136,8 +136,8 @@ function resolveEngine(role: ModelRole): PiEngine | undefined {
 
 setJobRespawn((jobId) => void jobRunner.runJob(jobId));
 
-/** The route-facing entry: parse {chatId, input} and run one turn. */
 /**
+ * 面向路由的入口：解析 {chatId, input} 并运行一个回合。
  * 处理针对特定聊天会话的 HTTP 请求入口（POST /api/chat）。
  * @param req 传入的 HTTP 请求对象，预期包含要提交的聊天内容或交互类型。
  * @param buildAgent 能够用来构建 AI Agent 的选项工厂函数，一般仅测试使用。
@@ -168,11 +168,10 @@ export async function handleChatRequest(
 }
 
 /**
- * The turn composition: one input event → native record appends → one
- * agent turn as a background object. Also the wake pipeline's entry
- * (TurnInput's steer kind appends the marker under the same claim).
- */
-/**
+ * 回合组合（turn composition）：一个输入事件 → 原生记录追加 → 一个
+ * 作为后台对象的代理回合（agent turn）。也是唤醒管道（wake pipeline）的入口
+ * （TurnInput 的 steer 种类在相同声明下追加标记）。
+ *
  * 处理解析后的聊天输入，更新对话上下文，并触发 AI 代理回合。此方法是单次对话回合构建核心。
  * 将单一的输入事件转换为原生的对话记录添加，然后在后台作为独立对象运行 Agent 回合。
  * 这也是后台作业(Wake pipeline)调度的入口。
