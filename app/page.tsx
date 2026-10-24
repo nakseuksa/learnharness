@@ -7,14 +7,18 @@ import { resolveSettings, slotsConfigured } from "@/src/core";
 // the record (dynamic routes aren't cached client-side).
 export const dynamic = "force-dynamic";
 
+/**
+ * HomePage 组件是应用的默认入口页面 (/)。
+ * 它主要负责读取后端的设置记录，并将其传递给客户端的 Home 组件。
+ */
 export default function HomePage() {
-	// First-run gate (model-slots wave): chats cannot start until the user
-	// has picked all three slots — the dock shows the CTA while the raw
-	// record's models section lacks any slot pin.
+	// 首次运行拦截（模型插槽配置）：在用户完成所有三个模型插槽的选取前，
+	// 无法开始新的会话。这通过检查原始配置记录中的模型配置来实现，并在尚未配置时显示配置提示 (CTA)。
 	const record = readSettingsRecord();
-	// GRAPH RENDERING (owner, 2026-10-06): off = the home's main view is
-	// the chains view. Resolved through the one core resolver (missing
-	// section / absent key → factory default on); re-read per navigation.
+
+	// 图谱渲染模式判定：根据设置决定首页的主要视图是图表(canvas)还是逻辑链列表视图(chains view)。
+	// 如果配置中不存在该字段，则通过 resolveSettings 解析为系统默认值（默认开启图形渲染）。
+	// 因为页面被标记为 force-dynamic，每次导航都会重新读取这个配置。
 	const rendering = resolveSettings(record ?? null).graph.rendering;
 	return (
 		<Home initialConfigured={slotsConfigured(record?.models)} rendering={rendering} />
