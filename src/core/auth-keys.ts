@@ -1,64 +1,71 @@
 /**
- * The curated auth-key catalog + shape rules (auth-keys wave, 2026-09-19).
- * PURE, browser-safe — no fs, no env. The catalog drives the auth page's
- * key list (label, description, where-to-get docs link) and the write-side
- * shape validation (owner decision: SHAPE-ONLY validation, no live pings —
- * a revoked key looks fine until a real call fails; that trade was chosen
- * over phoning providers).
+ * 精选的授权密钥目录及形状验证规则 (2026-09-19 引入)。
+ * 纯逻辑(PURE)，浏览器安全 — 不依赖文件系统 (fs) 或环境变量 (env)。
+ * 该目录驱动授权页面的密钥列表展示（包括标签、描述、获取密钥的文档链接），
+ * 并用于写入时的形状验证（所有者决策：仅验证形状，不进行实时连通性测试 —
+ * 吊销的密钥在实际调用失败前看起来是正常的；这是权衡后不主动向提供商发送请求的结果）。
  *
- * The store itself is the long-standing flat {VAR: value} auth.json map
- * (see config.AUTH_FILE): keys are identified BY their environment-variable
- * name — the same name consumers read today (OPENROUTER_API_KEY, …), so the
- * catalog id IS the file key and the env var, one name everywhere.
+ * 存储本身是一个长期存在的扁平键值对映射 {变量名: 值}，保存在 auth.json 中
+ * (参见 config.AUTH_FILE)：密钥的标识符就是它们的“环境变量名” — 也就是
+ * 现今消费者读取时使用的名称（例如 OPENROUTER_API_KEY，…），
+ * 因此目录的 ID 既是文件中的键名，也是环境变量名，全局统一命名。
  *
- * Unknown vars found in the file (outside the catalog) are PRESERVED
- * verbatim and surfaced as generic entries — forward-compat for future
- * entries (e.g. a plans-login token) without a schema change — but they
- * are not hand-writable through the curated API (only the catalog's keys
- * have shapes worth checking and docs worth showing).
+ * 如果在文件中发现了未知变量（不在当前目录中的键），它们将被原样保留 (PRESERVED)，
+ * 并作为通用条目展示 — 这是为了向下兼容未来的新条目（如登录令牌），
+ * 而无需更改数据结构。但是，通过精选 API 无法手动编辑这些未知键
+ * （只有目录中的键才具有值得校验的数据形状以及值得展示的文档链接）。
  */
 
-/** One curated key entry. `id` is the env-var/file key name. */
+/** 单个精选密钥条目。`id` 即为环境变量名/文件中的键名。 */
 export interface AuthKeyInfo {
 	id: string;
-	/** Human label for the settings page. */
+	/** 用于在设置页面展示的人类可读标签。 */
 	label: string;
-	/** One-sentence what-is-this-for. */
+	/** 简明扼要的一句话说明该密钥的用途。 */
 	description: string;
-	/** Where the user gets a key (opens in the real browser via the shell). */
+	/** 用户获取密钥的地址 (通过壳层在真实的浏览器中打开)。 */
 	docsUrl: string;
 }
 
+/** 精选授权密钥的预定义配置列表 */
 export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 	{
 		id: "DEEPGRAM_API_KEY",
 		label: "Deepgram",
-		description: "Speech-to-text key for dictation — needs ≥ Member permission in the Deepgram console to mint tokens.",
+		description: "用于听写的语音转文本密钥 — 需要在 Deepgram 控制台中拥有 ≥ Member(成员) 权限才能生成令牌。",
 		docsUrl: "https://console.deepgram.com/",
 	},
 	{
 		id: "TAVILY_API_KEY",
 		label: "Tavily",
-		description: "Web-search engine for the researcher sub-agent (AI-native search API). Setting the key activates it — no engine toggle needed.",
+		description: "供研究员子代理使用的网络搜索引擎 (AI原生搜索 API)。设置此密钥即可激活它 — 不需要额外的引擎切换按钮。",
 		docsUrl: "https://app.tavily.com/",
 	},
 	{
 		id: "BRAVE_API_KEY",
 		label: "Brave Search",
-		description: "Web-search engine for the researcher sub-agent — the alternative to Tavily. Setting the key activates it.",
+		description: "供研究员子代理使用的网络搜索引擎 — Tavily 的替代方案。设置此密钥即可激活它。",
 		docsUrl: "https://brave.com/search/api/",
 	},
 ] as const;
 
+/** 已知授权密钥 ID 集合 */
 const AUTH_KEY_IDS: ReadonlySet<string> = new Set(AUTH_KEYS.map((k) => k.id));
 
+/**
+ * 检查给定的 ID 是否是已知的精选授权密钥。
+ * @param id 要检查的密钥 ID
+ * @returns 如果是已知密钥则返回 true，否则返回 false
+ */
 export function isKnownAuthKey(id: string): boolean {
 	return AUTH_KEY_IDS.has(id);
 }
 
-/** One model-provider key row for the settings page's dropdown: which
- *  pi-ai provider, the env var its key rides in, and the human label
- *  (pi's own Provider.name). */
+/**
+ * 设置页面下拉列表中的模型提供商密钥配置行：
+ * 包含这是哪个 pi-ai 提供商，其密钥关联的环境变量名，
+ * 以及人类可读的标签 (通常为 pi 内部 Provider.name)。
+ */
 export interface AuthProviderInfo {
 	id: string;
 	envVar: string;
@@ -66,23 +73,21 @@ export interface AuthProviderInfo {
 }
 
 /**
- * THE MODEL-PROVIDER KEY TABLE (provider-keys interlude, 2026-09-19):
- * every pi-ai provider that takes a PLAIN api-key env var — derived from
- * pi-ai's own provider→env-var table at generation time, so it can never
- * drift from what pi actually reads: tests/auth-provider-keys.test.ts
- * re-derives the truth from pi-ai (builtinProviders + findEnvKeys via a
- * truthy-for-every-var proxy env) and asserts EXACT equality with this
- * table — a pi-ai upgrade that adds/renames a provider key fails the gate
- * loudly instead of drifting silently.
+ * 模型提供商密钥表 (2026-09-19 引入)：
+ * 包含每一个接受“普通 API 密钥环境变量”的 pi-ai 提供商 — 该表是在构建时从
+ * pi-ai 自身的 provider→env-var 映射表派生而来的，因此它绝不会与 pi 实际读取的内容产生偏差：
+ * tests/auth-provider-keys.test.ts 测试文件会从 pi-ai 中重新推导真相
+ * (通过组合 builtinProviders 以及一个包含所有变量的代理环境去调用 findEnvKeys)，
+ * 并断言与该表完全相等 — 当 pi-ai 升级并添加/重命名提供商密钥时，测试将大声失败以阻止合并，
+ * 而不是在静默中产生差异。
  *
- * EXCLUDED by owner spec — providers whose auth is not a plain key this
- * wave: github-copilot (OAuth), amazon-bedrock (AWS creds), google-vertex
- * (ADC), azure (needs a base URL), the cloudflare
- * account-scoped pair. Anthropic keeps ANTHROPIC_API_KEY only — its
- * AUTH_TOKEN/OAUTH_TOKEN alternates stay env-only. openai-codex exposes
- * no env-key (naturally absent). Providers sharing one env var (moonshotai
- * / moonshotai-cn, opencode / opencode-go, the qwen-token-plan pair,
- * xiaomi variants) each keep their own row — the UI groups as it wishes.
+ * 根据所有者规范，以下情况被排除 (当前阶段授权方式不是普通密钥的提供商)：
+ * github-copilot (OAuth), amazon-bedrock (AWS 凭据), google-vertex (ADC),
+ * azure (需要基础 URL), cloudflare 的账户范围密钥对。
+ * Anthropic 仅保留 ANTHROPIC_API_KEY — 它的 AUTH_TOKEN/OAUTH_TOKEN 替代方案仅保留在环境变量中。
+ * openai-codex 没有暴露 env-key (自然缺席)。
+ * 共享同一个环境变量的提供商 (如 moonshotai / moonshotai-cn, opencode / opencode-go,
+ * qwen-token-plan 系列, xiaomi 变体等) 仍各自保留独立的行 — 用户界面(UI)可以自由对它们进行分组。
  */
 export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
 	{ id: "ant-ling", envVar: "ANT_LING_API_KEY", label: "Ant Ling" },
@@ -122,33 +127,44 @@ export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
 	{ id: "zai-coding-cn", envVar: "ZAI_CODING_CN_API_KEY", label: "Z.AI Coding CN" },
 ] as const;
 
-/** Every distinct env var a model-provider key rides in (the write side's
- *  writability check — see isProviderEnvVar below; also drives which
- *  PRESENT provider vars surface as status rows). */
+/**
+ * 模型提供商密钥所关联的所有不同的环境变量集合
+ * (写入端的“可写性”检查 — 见下文 isProviderEnvVar；同时它也决定了
+ * 哪些已存在的提供商变量应作为状态行显示)。
+ */
 export const AUTH_PROVIDER_ENV_VARS: ReadonlySet<string> = new Set(AUTH_PROVIDER_KEYS.map((p) => p.envVar));
 
-/** Is this env-var name the key of SOME pi-ai model provider? */
+/**
+ * 检查此环境变量名是否属于某个 pi-ai 模型提供商的密钥？
+ * @param envVar 环境变量名称
+ * @returns 包含在提供商列表则返回 true
+ */
 export function isProviderEnvVar(envVar: string): boolean {
 	return AUTH_PROVIDER_ENV_VARS.has(envVar);
 }
 
-/** Shape-check result: ok, or a 400-ready message naming the expectation. */
+/** 形状检查(Shape-check)的结果类型：如果成功则 ok 为 true，如果失败则包含返回给用户的 400 错误信息。 */
 export type KeyShapeResult = { ok: true } | { ok: false; error: string };
 
 /**
- * The write-side shape gate (owner decision: reject bad pastes with 400 —
- * a truncated or wrong-family key can never land in the store). Values are
- * TRIMMED first (paste hygiene); empty-after-trim always fails.
+ * 写入端的形状校验门控 (所有者决策：通过 400 状态码拒绝不良的粘贴内容 —
+ * 截断或不符合对应格式家族的密钥绝对不能保存入库)。
+ * 值在校验前会先被修剪去头尾空白符 TRIMMED (粘贴卫生处理)；修剪后如果为空则始终失败。
  *
- * CURATED keys carry family rules (Tavily's tvly-… prefix; Brave and
- * Deepgram publish no format — length floors + paste hygiene only).
- * MODEL-PROVIDER keys use genericProviderKeyGuard below instead (families
- * vary by provider — only paste hygiene applies; owner spec: min length
- * ~12, no whitespace). OPENROUTER_API_KEY moved to the generic guard with
- * the provider-keys interlude — no sk-or family check anymore.
+ * 精选(CURATED)密钥包含特定的家族规则 (例如 Tavily 的前缀是 tvly-…；Brave 和
+ * Deepgram 没有公开特定的格式 — 因此只应用长度下限和粘贴卫生处理)。
+ *
+ * 模型提供商 (MODEL-PROVIDER) 的密钥则使用下方的 genericProviderKeyGuard
+ * (因为提供商的密钥格式各异 — 所以只适用粘贴卫生处理；所有者规范为：最小长度约为12，且不能有空白符)。
+ * 在提供商密钥过渡期，OPENROUTER_API_KEY 被移入此通用守护函数 — 不再进行 sk-or 家族格式校验。
+ *
+ * @param id 密钥 ID（环境变量名）
+ * @param rawValue 未处理的原始密钥值
+ * @returns 检查结果对象
  */
 export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 	const value = rawValue.trim();
+	// 辅助函数：校验非空、最小长度且不包含空白字符
 	const nonEmpty = (min: number) =>
 		value.length >= min && !/\s/.test(value)
 			? { ok: true as const }
@@ -159,46 +175,58 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 				? nonEmpty(20)
 				: { ok: false, error: `${id} must start with "tvly-" (Tavily's key format)` };
 		case "BRAVE_API_KEY":
-			// No public format — a length floor + paste hygiene only.
+			// 没有公开的统一格式 — 只有长度下限和基本的粘贴卫生校验。
 			return nonEmpty(20);
 		case "DEEPGRAM_API_KEY":
-			// No public format — the length floor only catches truncated pastes.
+			// 没有公开的统一格式 — 长度下限主要是用来捕捉不完整的粘贴截断情况。
 			return nonEmpty(20);
 		default:
 			return { ok: false, error: `unknown key "${id}" (supported: ${[...AUTH_KEY_IDS].join(", ")})` };
 	}
 }
 
-/** The generic truncation guard for MODEL-PROVIDER keys (families vary —
- *  only paste hygiene applies; owner spec: trim, no whitespace, min 12). */
+/**
+ * 面向模型提供商 (MODEL-PROVIDER) 密钥的通用截断保护器
+ * (由于不同提供商的密钥族格式不同 — 此处仅应用粘贴卫生处理；
+ * 根据所有者规范：修剪首尾空白、不允许有中间空格、最小长度为 12 字符)。
+ *
+ * @param id 密钥 ID (环境变量名)
+ * @param rawValue 未处理的原始密钥值
+ * @returns 检查结果对象
+ */
 export function genericProviderKeyGuard(id: string, rawValue: string): KeyShapeResult {
 	const value = rawValue.trim();
 	if (value.length >= 12 && !/\s/.test(value)) return { ok: true };
 	return { ok: false, error: `${id} must be at least 12 characters with no whitespace` };
 }
 
-/** A masked key never leaves the server as plaintext (owner decision:
- *  last 4 chars + length — enough to identify which key is stored after
- *  rotating between several, and to spot a mis-pasted family). */
+/**
+ * 对密钥进行掩码脱敏。被脱敏处理的密钥绝不会以明文形式离开服务器
+ * (所有者决策：展示最后的 4 个字符以标识密钥长度 — 这足以在轮换多个密钥时进行识别，
+ * 并能让人发现误粘贴了其他家族的密钥)。
+ *
+ * @param value 需要脱敏的原始密钥
+ * @returns 脱敏后的字符串（例如：…aB34）
+ */
 export function maskKey(value: string): string {
 	const v = value.trim();
-	if (v.length <= 4) return `…${v}`; // degenerate paste — still never the whole value
+	if (v.length <= 4) return `…${v}`; // 退化粘贴情况（密钥过短）— 依然不能返回完整的明文
 	return `…${v.slice(-4)}`;
 }
 
-/** One key's status row for the GET view (never carries plaintext). */
+/** 用于 GET 视图请求的单个密钥状态行数据结构 (绝对不会携带明文信息)。 */
 export interface AuthKeyStatus {
 	id: string;
-	/** Catalog metadata when the key is curated; null for unknown-file-var
-	 *  entries (preserved + surfaced, but no curated form to edit through). */
+	/** 如果是精选目录内的密钥则包含其元数据；对于未知的文件内变量，此值为 null
+	 *  (未知变量会被原样保留并显示，但没有表单支持通过精选 API 修改)。 */
 	info: AuthKeyInfo | null;
-	/** A key is present when EITHER the environment or the file has it. */
+	/** 当前密钥是否存在 (环境变量或者文件中只要有一处存在，即为存在)。 */
 	present: boolean;
-	/** The masked tail + character count, e.g. "…ab12 (64 chars)". */
+	/** 脱敏后的尾部字符串，(以前还包括字符长度统计例如 "…ab12 (64 chars)"，目前只保留掩码结果)。 */
 	masked: string | null;
-	/** Where the live value comes from, given env-wins precedence. */
+	/** 当前生效值的来源。在优先级上，"env"（环境变量）胜过 "file"（文件）。"none" 表示全都不存在。 */
 	source: "env" | "file" | "none";
-	/** True when the file holds a value that the environment shadows — the
-	 *  settings page explains why a saved key is not the live one. */
+	/** 当文件内保存了密钥值，但却被环境变量中的值覆盖（屏蔽）时，该值为 true —
+	 *  这样在设置页面上可以向用户解释为什么他们保存的密钥没有生效。 */
 	shadowedByEnv: boolean;
 }

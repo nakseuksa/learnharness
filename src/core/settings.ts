@@ -421,13 +421,15 @@ const PROSE_FONT_MAX = 24;
 
 const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
 
-/** #rgb / #rrggbb (case-insensitive) — the only color format we accept. */
+/** 检查是否为 #rgb 或 #rrggbb 格式（不区分大小写） — 这是我们唯一接受的颜色格式。 */
 export function isHexColor(value: string): boolean {
 	return /^#[0-9a-fA-F]{3}$/.test(value) || /^#[0-9a-fA-F]{6}$/.test(value);
 }
 
-/** Coerce an arbitrary hex-or-null field: null and valid hex pass through,
- *  anything else becomes null (the factory/per-mode default). */
+/**
+ * 强制转换任意的十六进制(hex)或 null 字段：null 和有效的十六进制颜色值将直接通过，
+ * 其他任何无效值都将变为 null (即回退到出厂/当前模式的默认值)。
+ */
 function sanitizeHexOrNull(value: unknown): string | null {
 	if (value === null) return null;
 	if (typeof value === "string" && isHexColor(value)) return value;
@@ -444,6 +446,7 @@ function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
 	return out;
 }
 
+/** 允许的思考级别 (ThinkingLevel) 列表 */
 const THINKING_LEVELS: readonly ThinkingLevel[] = [
 	"off",
 	"minimal",
@@ -454,6 +457,10 @@ const THINKING_LEVELS: readonly ThinkingLevel[] = [
 	"max",
 ];
 
+/**
+ * 清理并验证针对某个角色的模型覆盖设置 (RoleModelOverride)。
+ * 如果数据结构无效则返回 undefined。
+ */
 function sanitizeRoleOverride(raw: unknown): RoleModelOverride | undefined {
 	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
 	const r = raw as Record<string, unknown>;
@@ -476,9 +483,11 @@ function sanitizeRoleOverride(raw: unknown): RoleModelOverride | undefined {
 	return Object.keys(out).length ? out : undefined;
 }
 
-/** The models section (model slots wave, 2026-09-20): each slot keeps
- *  only well-formed parts — the same shape rules as a role override, so a
- *  stale client can't park junk in a slot. */
+/**
+ * 清理 models 节点配置 (2026-09-20 引入的模型插槽机制)：
+ * 每个插槽 (slot) 仅保留格式正确的部分 — 校验规则和 role override 相同，
+ * 这可以防止过时的旧客户端在插槽中塞入垃圾数据。
+ */
 function sanitizeModels(raw: Record<string, unknown>): ModelsSettings {
 	const out: ModelsSettings = {};
 	for (const slot of MODEL_SLOTS) {
@@ -497,6 +506,7 @@ function sanitizeBooleanMap(raw: unknown): Record<string, boolean> | undefined {
 	return Object.keys(out).length ? out : undefined;
 }
 
+/** 清理代理(Agent)相关的设置 */
 function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 	const out: AgentSettings = {};
 	if (raw.models !== null && typeof raw.models === "object" && !Array.isArray(raw.models)) {
@@ -513,16 +523,16 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 	if (tools) out.tools = tools;
 	const prompts = sanitizeBooleanMap(raw.prompts);
 	if (prompts) out.prompts = prompts;
-	// Search preference: lenient read side (an unknown engine id drops;
-	// the write side's parser is strict — a stale client can't brick the
-	// record, it just loses the pin and auto-detection resumes).
+	// 搜索(Search)偏好设置：读取端策略非常宽松 (未知的引擎 ID 会被直接丢弃；
+	// 但写入端的解析器是严格的 — 过时的客户端无法破坏记录，最多只会丢失固定的偏好设置
+	// 并恢复到自动检测模式)。
 	if (raw.search !== null && typeof raw.search === "object" && !Array.isArray(raw.search)) {
 		const engine = (raw.search as Record<string, unknown>).engine;
 		if (engine === "tavily" || engine === "brave") out.search = { engine };
 	}
-	// Prober graph tools (wave 7): its own agent-section subsection —
-	// lenient read side (a bad shape drops the key and the default ON
-	// resumes; the write side's parser is strict).
+	// 探针图工具 (wave 7): 这是 agent 节点下的一个独立子节点 —
+	// 读取端同样宽松 (糟糕的数据结构会使该键被丢弃并恢复为默认的 ON 开启状态；
+	// 写入端的解析器是严格的)。
 	if (raw.graphTools !== null && typeof raw.graphTools === "object" && !Array.isArray(raw.graphTools)) {
 		const enabled = (raw.graphTools as Record<string, unknown>).enabled;
 		if (enabled === undefined) out.graphTools = {};
@@ -559,20 +569,19 @@ function sanitizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
 	return out;
 }
 
+/** 清理图(Graph)相关设置 */
 function sanitizeGraph(raw: Record<string, unknown>): GraphSettings {
-	// Wave 7 collapse (owner ruling 2026-09-23): the section is the master
-	// switch ONLY. The dead rungs' keys (embedding/clustering/labeling/
-	// embeddingModel) in existing records are simply UNREAD and DROPPED by
-	// this reconstruction — the migration story: the next graph-section
-	// write (PUT is replace-whole) persists the collapsed shape, and no
-	// active code ever looks at the stale fields.
+	// Wave 7 折叠处理 (基于所有者在 2026-09-23 的决策)：该部分目前只包含总开关。
+	// 现有记录中已经废弃的阶梯键 (如 embedding/clustering/labeling/embeddingModel)
+	// 在此次重构中仅仅是不被读取(UNREAD)并被丢弃(DROPPED) — 它的迁移故事是：
+	// 下一次 graph 节点的写入 (PUT 是全量替换) 就会固化这种折叠后的新形状，
+	// 而且不会有任何活跃的代码去查看这些陈旧的字段。
 	//
-	// extractionChunkTokens (extraction-UX redesign, 2026-09-24): the chunk
-	// budget — clamp-never-reject (the bd68486 discipline): a finite
-	// positive number floors to EXTRACTION_CHUNK_TOKENS_FLOOR (fractions
-	// floor to integers), anything else drops to the factory default at
-	// resolution. A disk record below the floor (older app, hand edit)
-	// clamps UP — the floor is a cost protection, not data to honor.
+	// extractionChunkTokens (2026-09-24 提取UX重新设计): 分块处理的预算(token 数量) —
+	// 遵循“钳制而不拒绝(clamp-never-reject)”原则：必须是一个有限正数，并设置
+	// EXTRACTION_CHUNK_TOKENS_FLOOR 作为下限 (小数向下取整)；任何不符合要求的值
+	// 都会在解析时被丢弃并使用出厂默认值。如果磁盘里的旧记录低于下限(比如老版本应用或手动修改)，
+	// 也会被强行钳制提升(clamps UP) — 设定下限是为了做成本保护，而不是为了尊重无效数据。
 	const out: GraphSettings = {};
 	const enabled = boolOrDrop(raw.enabled);
 	if (enabled !== undefined) out.enabled = enabled;
@@ -585,10 +594,12 @@ function sanitizeGraph(raw: Record<string, unknown>): GraphSettings {
 	return out;
 }
 
-/** clamp-never-reject (the sanitizer's discipline): a finite positive
- *  number floors to COMPACTION_THRESHOLD_FLOOR, anything else drops (the
- *  factory default resolves at read time). Exported for the PUT parser's
- *  reject-with-rationale (the graph chunk-budget precedent). */
+/**
+ * 钳制而不拒绝 (clamp-never-reject，这是清理器的准则)：有限正数必须不小于
+ * COMPACTION_THRESHOLD_FLOOR 下限，除此之外的其他任何值都会被丢弃
+ * (在读取时会解析为出厂默认值)。导出供 PUT 接口的解析器使用以提供合理的拒绝信息
+ * (这是图分块预算开创的先例)。
+ */
 export const COMPACTION_THRESHOLD_FLOOR = 32_000;
 
 function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
@@ -601,10 +612,13 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 }
 
 /**
- * Coerce arbitrary JSON (disk file, network body) into a valid delta record:
- * known fields validated strictly (invalid ones drop/clamp per module doc),
- * UNKNOWN KEYS PRESERVED VERBATIM (a newer record must survive an older
- * app). Never throws. Non-objects → null.
+ * 将任意的 JSON (例如来自磁盘文件或网络请求体) 强制转换为有效的差异记录 (delta record)：
+ * 已知的字段受到严格的验证 (无效的值根据上述各模块规则会被丢弃/钳制)；
+ * 对于【未知的键则会原样保留 (PRESERVED VERBATIM)】 (为了保证较新的配置记录在旧版应用中依然存活)。
+ * 绝对不会抛出异常 (Never throws)。如果不是对象类型则返回 null。
+ *
+ * @param raw 原始输入数据
+ * @returns 清理后的用户设置对象
  */
 export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -631,11 +645,10 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 			out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 		}
 	}
-	// Unknown top-level keys ride along untouched (forward-compat). One
-	// known-DEAD key is stripped instead of riding: `chat` (the old
-	// default-settings section) died with per-session models (owner,
-	// 2026-09-28) — a fossil copy on disk must never resurrect through
-	// reads (and any later write flushes it from the file for good).
+	// 未知的顶级键会被原封不动地保留以支持向下兼容(forward-compat)。
+	// 但有一个已明确废弃 (known-DEAD) 的键会被剥离而非保留：`chat` (这是旧版本中的
+	// 默认设置节点) 它在引入“按会话设置模型”的特性时已被淘汰 (所有者规则，2026-09-28) —
+	// 磁盘上留存的化石级旧数据绝对不能通过读取被复活 (之后的任何写入操作都会将它永远从文件中清除)。
 	for (const [key, value] of Object.entries(r)) {
 		if (key === "chat") continue;
 		if (!(key in out)) out[key] = value;
