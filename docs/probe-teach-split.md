@@ -1,176 +1,79 @@
-# The probe→teach agent split & plan-movement semantics
+# 探测→教学智能体的拆分与计划推移语义 (The probe→teach agent split & plan-movement semantics)
 
-Shared understanding reached 2026-09-11 (user + master session). This is the
-convergence record — the decided design, with reasoning. It is not a task
-list; implementation waves are planned against it.
+于 2026-09-11 达成的共识记录（用户 user + 主会话 master session）。这是一份融合记录 — 记录了所做出的设计决定以及背后的考量。它不是一份任务清单 (task list)；后续的实施波段 (implementation waves) 将依据此文档进行规划。
 
 ---
 
-## 1. Two agents, one conversation
+## 1. 两个智能体，同一场对话 (Two agents, one conversation)
 
-Probing and teaching are structurally so different that they get **separate
-agents**: separate system prompts and separate tool sets, each fully
-fleshed-out with a major focus on its own phase. The split extracts more
-system-instruction alignment: neither agent carries the other phase's bulk
-(neither needs the specifics — each gets only a brief summary of the other's
-philosophy so they share a view of the whole process).
+探测 (probing) 与教学 (teaching) 在结构上差异极大，因此它们获得了 **各自独立的智能体 (separate agents)**：拥有各自的系统提示词，各自独立的工具集，每一个都被完全丰满化，且重心全部放在其自身的阶段上。这种拆分榨取了更高程度的系统指令对齐：没有任何一方需要背负另一方繁重的阶段包袱（也不需要知道对方的具体细节 — 它们只需互相了解对方哲学理念的一小段概述即可，以此保证对整个流程有全局观）。
 
-- **The prober** runs the probing phase: quiz + ask_user_question +
-  `probe_done`. Its quiz is a *different tool* (different schema: **no
-  `nodeId` field at all**) under the same name, so the model is never shown a
-  field it must not use. No plan tools, no jobs, no demos.
-- **The teacher** runs everything from planning onward: full tool set
-  (teach quiz with nodeId, plan_init, jobs, demos). Constructed the moment the
-  transcript carries a `probe_done`.
-- **The swap happens between probing and planning** — the planning phase
-  needs full knowledge of how teaching is done, so the teacher agent starts
-  at planning.
-- **They share the message history.** No fresh start: the history holds
-  subtleties an assessment summary would lose. History tool parts are
-  content, not live schemas — the teacher reads the prober's quiz calls as
-  past conversation; the one foreign tool (`probe_done`) reads as a concluded
-  past action, and even a hypothetical re-call degrades to a returned
-  tool-error (the return-to-agent doctrine).
-- **Invisible to the user**: same chat, same record, same UI. The agents are
-  constructed per-request by the same composition root; "which agent" is a
-  construction branch, not a handoff.
+- **探测者 (prober)** 负责运行探测阶段：包含测验 (quiz) + 提问 (`ask_user_question`) + `probe_done`。它的测验工具与后续的测验是 *不同的工具 (different tool)*（拥有不同的 schema 约束：**根本就没有 `nodeId` 字段 (no `nodeId` field at all)**），虽然名字一样，但这样模型就绝对不会看到那些它在这个阶段不该去碰的字段了。没有任何关于计划 (plan) 的工具，没有任务 (jobs)，也没有演示 (demos)。
+- **教师 (teacher)** 负责从制订计划开始往后的一切事务：拥有全套工具（带有 `nodeId` 字段的教学测验、`plan_init`、任务 jobs、演示 demos）。当记录转录本中出现了 `probe_done` 的那一刻，它就会被构建出来。
+- **两者的交接就发生在探测完毕与计划开始之间** — 由于计划阶段需要全盘掌握该怎么去教的知识，因此教师智能体从制订计划 (planning) 时就开始介入。
+- **它们共享整个消息历史记录。** 没有所谓的重新开始：历史记录里保存了那些任何形式的评估总结都无法留住的微妙细节。过去的工具片段对它而言仅仅是内容本身，而非那些在活动状态下被限制的 schema 约束 — 教师将探测者发起的各种测验视作过去的对谈；那唯一一个外人工具 (`probe_done`) 读起来就像是一个已经完结的历史动作，哪怕它想虚空再调用一次，也只会乖乖跌落到抛出一个工具报错 (退回给智能体 return-to-agent 准则) 的下场。
+- **对用户完全隐形**: 还在同一个聊天框里，同一份持久化记录，同一个 UI 界面。两个智能体都是由同一个组合根 (composition root) 在收到请求时当场构建出来的；所谓“该用哪个智能体”仅仅是代码构建分支的走位，而非一种肉眼可见的交接。
 
-## 2. `probe_done` — the seam tool
+## 2. `probe_done` — 充当接缝的工具 (`probe_done` — the seam tool)
 
-The prober concludes explicitly:
+探测者会通过以下方式进行显式收尾：
 
-- **Server-side tool.** Input: the learner assessment. Output: ok/error.
-- **Refuses while a question is open** ("resolve the open question first") —
-  same doctrine as nodeId validation.
-- **Refuses a second conclusion** (idempotent: the probe concludes once).
-- The assessment is the tool call's input, so it streams to the learner live
-  and is durable in the transcript by the tool result itself. A dedicated
-  assessment card/viewer comes later (UI).
-- **Assessment shape (v1, refine later): a list of dependency strands + a
-  free-form read of the learner's edge on each.** The probe was already a
-  binary search per strand the lesson depends on; the assessment formalizes
-  exactly that. Optional overall summary.
-- **Side effect: it queues the handoff.** When the prober's turn ends, the
-  wake pipeline (the same machinery that delivers sub-agent results and
-  abort steers) fires a server-side turn with a handoff steer — the teacher
-  is constructed (probe_done is in the transcript) and authors the plan.
-  The learner experiences assessment → plan as one continuous flow. If the
-  wake is lost (crash window), the next client message still constructs the
-  teacher — the transcript is the source of truth.
+- **这是一个服务器端的工具 (Server-side tool)。** 输入内容：对学习者的评估结论。输出：ok 或 error。
+- **当尚有未答复的问题敞开时将被拒绝执行 (Refuses while a question is open)**（“请先解决那个还悬着的问题”）— 这跟校验 nodeId 时采用的是同一套原则。
+- **拒绝给出第二份结论 (Refuses a second conclusion)**（满足幂等性：探测动作只会总结一次）。
+- 这份评估报告其实就是该工具调用的输入内容，因此它本身就能直接流式呈现给学习者，并借由该工具的结果自己原封不动地沉淀在转录本 (transcript) 里面。至于专门做个精致的评估结果卡片/阅览器，那是以后的事了 (UI 层面)。
+- **评估的数据形态 (v1 版本，以后再细化): 包含一组依赖脉络 (dependency strands) 列表 + 针对每一脉络下学习者所处边缘边界的一段自由描述。** 之前所谓的探测阶段，本来就是针对这门课所依赖的每条脉络进行一次次的二分查找；这份评估报告只是把它给完全正式化了而已。最后可选配一段总的概述。
+- **副作用 (Side effect): 它会将交接动作排入队列 (queues the handoff)。** 当探测者的这轮发言结束后，唤醒管道 (wake pipeline，就是那个用来派送子智能体结果和中断引导指令 abort steers 的同一套机制) 会立即触发一个由服务器端发起的带交接引导 (handoff steer) 的轮次 — 随之教师被构建出来了（因为此时 `probe_done` 已经留存在了记录中）并由它去制订计划。从学习者的视角来看，评估 → 计划完全是顺理成章、行云流水般的同一步骤。即便遇到唤醒信号丢失（发生崩溃的极小概率窗口），下一次客户端发来的消息依然能照常唤醒教师 — 因为转录本 (transcript) 才是唯一的真理之源。
 
-## 3. `nodeId` semantics — position, not completion
+## 3. `nodeId` 语义 — 代表位置，而非代表完结 (`nodeId` semantics — position, not completion)
 
-The old contract read a *correct* answer on a tagged check as "node done."
-That is the wrong signal and is **abolished**. The new contract:
+旧版契约里，只要在打过标签的考察点上拿到了一个 *正确 (correct)* 答案，就会被视作“该节点已完结”。这是个错误的信号机制，已被 **彻底废除 (abolished)**。新的契约是这样规定的：
 
-> **`nodeId` on a quiz means: "this question is about this node."**
-> Nothing else. It is a position signal, never a completion signal.
+> **测验上带的 `nodeId` 意味着：“这道题问的是关于这个节点的内容。”**
+> 仅此而已。它纯粹是个反映位置的信号，绝非一个代表搞定的信号。
 
-- **Current node = the node referenced by the most recent tagged quiz
-  call** (the call, not the result — any state counts).
-- **Visited = every node that appeared in an earlier tagged quiz call.**
-  Sticky, monotonic. There is **no done ledger and no done bookkeeping of
-  any kind** — everything is inferred from the session history. The stored
-  tree carries structure only (the author-once protocol taken to its
-  conclusion: `currentNodeId`/`doneNodeIds` are removed from the tree).
-- **A node spans multiple turns and multiple checks naturally.** Several
-  questions may tag the same node — the map stays put. The teacher moving to
-  a new node *is* the teacher's judgment that the previous one is finished,
-  regardless of individual check outcomes (a failed check followed by a
-  re-teach and a move-on is still a visited node).
-- **Failed checks move nothing.** Results no longer feed derivation at all.
-- **Untagged checks no longer exist** (owner ruling 2026-09-26): `nodeId`
-  is required on the teach quiz schema — an untagged call is rejected at the
-  boundary and the model retries tagged. Off-map checks (quick comprehension
-  checks that don't fit a node) route through ask_user_question. The map can
-  never freeze from a lost tagging signal again.
-- **No fallback current.** Before the first tagged check nothing is
-  current. No derived-from-prereqs guess.
-- Present-but-invalid ids are still rejected at the call boundary (existing
-  validation, return-to-agent retry).
-- Visualization: current node gets a special highlight; visited nodes
-  render visible (not grayed); upcoming nodes gray out. "Where have we
-  been, where are we."
+- **当前节点 (Current node) = 距离现在最近的那次打过标签的测验调用所指向的节点**（指的是发起了调用就算，不需要管结果如何 — 任何状态都算数）。
+- **已访问节点 (Visited) = 所有在先前打过标签的测验里抛过头露过面的节点。** 这种状态是黏滞的、只增不减的 (monotonic)。**再也没有所谓的已完结账本 (done ledger) 或者关于节点搞定状态的任何簿记工作了 (no done bookkeeping of any kind)** — 一切状态皆由会话历史中推导得出。储存的树结构现在只负责保留纯粹的拓扑骨架（这就是“只编写一次”协议 (author-once protocol) 贯彻到底的体现：`currentNodeId`/`doneNodeIds` 全从那棵树的身上给剥离了）。
+- **一个节点横跨多个对话轮次并经历数个考察点是再自然不过的事。** 可能会有好几道题同时指向了同一个节点 — 此时地图进度就待在原地不动。当教师决定转移到下一个新节点时，这个行为本身 *就代表了* 教师的主观判断认为上一个节点已经教完了，无论那一道道题单独的结果如何（就算是一道题没答对，接着重教了一遍，然后继续往下走，这也同样算作是一个已被访问的节点 (visited node)）。
+- **答错的考题不会改变任何指针的去向。** 测验的答对答错再也不会去反哺或牵扯任何状态的派生计算。
+- **无标签的教学测验彻底死亡 (Untagged checks no longer exist)**（负责人于 2026-09-26 裁定）：在教课期间发起的测验 schema 规定 `nodeId` 是必填项 — 要是连标签都不打，在边界处就会被当场打回，逼着模型回去加上标签重试。对于那些确实不在地图上的小测验（比如那些只图确认一下快速理解情况、但扣不上任何节点的随堂查岗），请一律走 `ask_user_question` 路由。由此一来，因为丢失标签信号而导致地图死机冻结的破事再也不会发生了。
+- **不再有保底的当前节点 (No fallback current)。** 在第一道带了标签的考题出来前，根本就没有什么当前节点。绝不再做那种什么“基于前置节点推算出当前节点”的瞎猜。
+- 如果传了个虽然有、但根本不存在于地图上的 id，在调用的边界处照样会被直接拍回去（用的还是现有的校验机制，打回给智能体重试 return-to-agent retry）。
+- **视觉呈现 (Visualization)**: 当前节点 (current) 会披上专属的高亮打光；已经踩过的节点 (visited) 会保持正常显像 (而不会被弄成灰色)；而即将到来的节点 (upcoming) 统统被刷成灰色。直观传达出“我们一路是从哪走来的，现在我们又到了哪里。”
 
-## 4. Phases — explicit events, no occupancy derivation
+## 4. 阶段 — 全凭显式事件驱动，告别驻留状态的派生计算 (Phases — explicit events, no occupancy derivation)
 
-The phase chain is **event-driven**:
+阶段链条现在纯粹是 **事件驱动的 (event-driven)**：
 
-**probe (prober)** — `probe_done` → **planning (teacher)** — the first
-`nodeId`-tagged quiz call → **teach (teacher)**
+**探测 (probe，由探测者负责)** — 出现 `probe_done` → **制订计划 (planning，由教师负责)** — 出现第一道被打上 `nodeId` 标签的测验调用 → **教学 (teach，由教师负责)**
 
-- The broken derived-occupancy seam (phase-of-tree via `currentNodeId`
-  nothing ever sets — the stuck-on-plan bug) is **replaced, not patched**.
-- The verdict gate is DEAD (owner ruling 2026-09-26 — simplified away):
-  presenting the plan ends the teacher's turn, and the learner's next
-  message is a natural reply — a change request (revise, re-present, end
-  the turn again) or the go-ahead. The plan→teach seam is **inferred**:
-  the first quiz call tagged with a `nodeId` (a question ABOUT a plan
-  node; probe quizzes carry no nodeId) is where teaching begins. The
-  phase fold (`phaseAt3`) advances there, the teaching divider renders
-  before that whole assistant block, and the live phase indicator may lag
-  until the first node's question is posed (owner-accepted). Mid-lesson
-  `plan_init` rewrites need no gate at all.
-- The session picker phase derives from the transcript the same way.
+- 曾经那套破破烂烂的通过推导来确定所处位置的缝合机制（即那个根据本来就永远没人去设置的 `currentNodeId` 来试图推导出阶段的办法 — 也就是导致“卡死在计划阶段”那个 Bug 的罪魁祸首）被 **彻底替换掉了，而不仅仅是打个补丁 (replaced, not patched)**。
+- 所谓的结论门控 (verdict gate) 正式宣告死亡 (DEAD)（负责人于 2026-09-26 裁定 — 砍掉为了精简）：由于大模型只要一出示那份计划它这一回合就算是结了，那么学习者下一句话自然而然就是对此的回复 — 要么就是提出修改要求（这会导致修改、重新出示计划，并再次结束该回合），要么就是大开绿灯。那么 计划→教学 之间的接缝其实全靠 **推断 (inferred)**：只要出现了第一道附有 `nodeId` 的测验调用（也就是提出了一道关于 (ABOUT) 计划中某个节点的问题；探测期的测验是根本不带 nodeId 的），这就标志着教学正式拉开帷幕。阶段的折叠态 (`phaseAt3`) 就从此处推进，作为教学区分界线的提示条 (teaching divider) 则渲染在那一整块助手消息堆的前头，即便实时的阶段指示器稍微慢半拍，一直要等到这第一个节点的问题丢出来后才更新也是没问题的（负责人已接受该方案）。如果在这上课中途非要通过 `plan_init` 进行计划重写，也压根不再需要什么门控卡着了。
+- 至于会话拾取器所在的阶段，也是用同样的手段从转录本里生推出来的。
 
-## 5. No global-graph context in sessions (for now)
+## 5. 现阶段不在会话中引入全局图谱作为上下文 (No global-graph context in sessions (for now))
 
-Both agents run **fully standalone** — no knowledge-graph injection into
-either prompt. The graph-as-session-context idea (W8) is shelved until
-there's a considered design for what it should actually feed. The global
-knowledge graph remains what the extraction pipeline builds; nothing in
-lesson prompts reads it.
+目前两个智能体都是在 **完全独立运行 (fully standalone)** 的 — 无论是谁的提示词里，都没有注入任何来自知识图谱的信息。关于“把图谱当成会话背景上下文”的构思（在 W8 中提及）暂且搁置，直到我们能设计出一套成熟的方案，彻底想明白这玩意到底应该往会话里喂点什么真材实料为止。全局的知识图谱目前纯粹是交给提取管道在后台一点点垒起来的产物；而在课程的那些提示词里面，完全没有任何一处去主动读取过它。
 
-## 6. The plan UI: persistent DAG window (direction)
+## 6. 计划树的 UI 设计：常驻型有向无环图窗口 (代表行进方向) (The plan UI: persistent DAG window (direction))
 
-The injected-blocks approach is superseded: the plan should live in a
-**persistent DAG window** in the conversation view (like the background-
-processes dock): always present, zoomed on the current node, auto-moving
-as the lesson advances; click → full plan (the existing popup survives as
-the expanded view). Exact layout/design is refined in the UI session.
+以前那种把计划区块直接插进消息流里的搞法被取代了：该计划应当待在对话视图中的一个 **常驻的 DAG 窗口里 (persistent DAG window)**（长得就像那个挂靠背景进程的停靠栏 dock 一样）：只要在里面，它永远都在那，镜头死死锁定放大在当前那个节点上，伴随讲课的推进自动挪移；你要是一点它 → 砰地一下全尺寸计划表就出来了（就用现有的那套弹出框作为它的展开态视图被保留了下来）。具体的排版/美术细节就在 UI 打磨环节里一点点磨。
 
-The window is LIVE (landed 2026-09-11, one day after the design): bottom-left,
-2:1 zoomed viewBox centered on the current node, clamped to the layout, click
-opens the popup. The full plan block also still renders in the flow at plan
-authoring (the presentation moment; the block sits immediately after the
-`plan_init` call) as a second popup entry point. The neighborhood-block
-machinery (frozen fragments) is retired — snapshots can't represent
-live-derived movement.
+这个窗口现在已经是活的了 (LIVE) (2026-09-11 落地，仅仅在敲定设计的第二天)：它缩在左下角，套着个 2:1 的拉近镜头，死死咬住当前的节点，在整体布局里服服帖帖；一戳就跳出个弹出框。至于完整尺寸的计划区块本身依然老老实实呆在它当年被写出来的那个位置的消息流里 (也就是呈现的那一瞬间；那块砖头紧随 `plan_init` 调用的后头)，借此充当这弹出框的第二个入口。之前那套搞局部街坊区块的破烂机制（冻结的残片）已经退役了 — 毕竟用静态死照是绝对拍不出来这种基于推演一路前行的活灵活现的动感的。
 
-## 7. Deferred / later waves (designed, not now)
+## 7. 被推迟的 / 放在后续波段的任务 (已设计好，只是现在不干) (Deferred / later waves (designed, not now))
 
-- ~~**Accept-plan UI**~~ — landed 2026-09-11, then **removed 2026-09-26**
-  (the verdict death): the seam is inferred from the first `nodeId`-tagged
-  quiz call (see §4).
-- **Assessment viewer** — the strand assessments displayed to the learner
-  as a proper card (data already durable in the transcript; the plain v1
-  probe-done card renders the assessment meanwhile).
-- **Model / thinking control** — currently hardcoded per role in
-  `config.ts` MODELS. The split gives natural `MODELS.prober` /
-  `MODELS.teacher` entries; runtime control comes after.
-- **Graph context, properly designed** — what the global graph should feed
-  into sessions (§5).
+- ~~**验收计划 UI 界面 (Accept-plan UI)**~~ — 曾于 2026-09-11 落地，接着又于 **2026-09-26 彻底移除** (判决死亡)：正如前面所言，这个接缝完全凭着首个带 `nodeId` 标签的测验一冒头，直接就被推断给搞定了 (见 §4)。
+- **评估结果的阅览器 (Assessment viewer)** — 就是把对各脉络出的那份评估结果，正儿八经地包装成个卡片给学习者看（反正数据早就稳稳当当地保存在转录本里了；现在的替代方案是让那个素颜第一版 v1 的 probe-done 卡片勉为其难充当一下评估展示板）。
+- **对模型及其思维能力的管控 (Model / thinking control)** — 目前在 `config.ts` 里对各个角色用的什么模型统统是写死的硬编码 (MODELS)。这次分家倒是顺理成章给了 `MODELS.prober` / `MODELS.teacher` 极好的入口；在运行时能随时操控模型的事往后放。
+- **关于如何把图谱当成上下文的设计，需要个正经的规划** — 即那座全局的大图谱到底该往每一场会话里输送点啥养料 (§5)。
 
-## 8. No backwards compatibility — ever
+## 8. 从不留所谓向后兼容的后路 — 永远不 (No backwards compatibility — ever)
 
-Legacy sessions are not supported. At major pivots the testing data is
-wiped and re-grown from new testing. No compat shims, no legacy marker
-fallbacks, no migration of old trees. `probe_done` is the only teacher
-construction key; sessions without it are prober sessions (dead legacy
-data is garbage to be wiped, not accommodated).
+对于那些遗留的老旧会话，系统恕不接待。只要遇上涉及到根基的大转向操作，测试数据库里所有的资料统统杀掉，然后通过新一轮跑出来的测试数据重新种出来。这儿不搞什么兼容补丁层 (compat shims)，没有老旧特征的降级备用预案，更没有对陈年老树的迁坟行动 (migration)。唯有 `probe_done` 是能够召唤出教师的唯一指令密钥；要是一场会话里根本找不见它，那这充其量就是一场全交给探测者的会话（也就是死掉的遗留数据，这叫一堆垃圾，扫了就是，休想去迎合它）。
 
 ---
 
-## Diagnosis context (why this pivot)
+## 诊断背景 (为什么要搞这次大变轨) (Diagnosis context (why this pivot))
 
-The 2026-09-11 user testing round (Nietzsche + Lacan sessions, minimal-
-effort GLM) exposed: (1) the teacher never tagged `nodeId` — every quiz in
-both sessions was untagged, so nothing ever derived; (2) the phase system
-structurally could not leave "plan" — `phaseOfTree` read `currentNodeId`,
-which the author-once protocol never sets, so no session could reach
-"teach"; (3) with result-derived "done," one passed check would have
-falsely finished a node. Model-compliance issues (untagged checks,
-free-text correctAnswer) are expected to shrink with higher thinking
-budgets and runtime model control — but the *semantics* had to be right
-first. Model mistakes are good test material: they exercise the
-return-to-agent validation loops.
+在 2026-09-11 的那次针对用户的实操检验里 (搞了场尼采与拉康的局，用了连吃奶劲都没使上的最小参数量 GLM 模型) 暴露出了一堆丑相：(1) 那教师它丫的压根就没打过什么 `nodeId` 标签 — 两场测试下来每一道题全TM是裸奔的，结果当然是什么状态推导也没派生出来；(2) 这个用来管阶段切换的系统，从结构上来说它其实就压根没有出走“计划阶段”的本事 — `phaseOfTree` 指着能从 `currentNodeId` 嘴里扣出点东西，但那个死抱“只编写一次”教条的该死机制，压根就永远不会去设这个值，这就导致连一场会话它都不可能够得着“开始教学 (teach)”的门槛；(3) 还有如果任由所谓的“靠答对来推断完成态”，那么只要瞎猫碰上死耗子蒙对一次，这节点就活生生给标成假完结了。关于模型不守规矩的破事儿 (漏打标签、正确答案自由放飞填空题 free-text correctAnswer) 靠着往后上更高思维档位的模型或者加上运行期控制台自然会迎刃而解 — 但是，这背后的 *语义 (semantics)* 必须首先得摆正，这才是头等大事。其实模型犯傻对我们而言反而是最棒的实弹测试饲料：借着它，恰好帮咱们把那一整套打回给智能体 (return-to-agent) 重新来过的检验防线给死死操练了一回。
