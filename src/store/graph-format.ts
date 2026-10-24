@@ -1,21 +1,21 @@
 /**
- * The graph-family FORMAT STAMP (schema-versioning wave, owner 2026-10-10):
- * data/graph/format.json — one sidecar versioning the whole graph dir
- * family (the four JSONL ledgers, sources.json, render-settings.json).
- * JSONL ledgers can't carry inline stamps without per-line bloat, and the
- * JSON files share the family's fate, so the stamp lives beside them.
- * positions.json is rebuildable (owner ruling) and needs no protection.
+ * 图谱家族格式印记 (FORMAT STAMP) (schema-versioning wave, owner 2026-10-10):
+ * data/graph/format.json — 一个独立的伴随文件 (sidecar)，用于对整个 graph 目录
+ * 家族进行版本控制（包括四个 JSONL 账本文件，sources.json，以及 render-settings.json）。
+ * 由于 JSONL 账本如果每行都内联印记会导致严重的数据膨胀，同时各 JSON 文件与整个家族的命运
+ * 绑定，因此版本印记文件与它们放在同级目录。
+ * positions.json 是可重建的（所有者决定），因此不需要这种保护。
  *
- * The contract:
- *  - LAZY v1: NO sidecar = v1 (the pre-stamp world stays valid forever);
- *    the first graph-family WRITE creates it. Reads never write.
- *  - Honest refusal (owner: refuse-honestly ruling): a sidecar stamped
- *    NEWER than this build (the downgrade scenario — user reverted the
- *    app) makes graph-family reads THROW. Read-modify-write stores must
- *    never rewrite what they don't understand; a ledger store must never
- *    silently skip lines it can't interpret as current-format data.
+ * 约定 (The contract):
+ *  - 惰性 v1 (LAZY v1): 没有伴随文件 = v1 版（印记机制出现前的旧数据永远保持有效）；
+ *    对图谱家族的第一次“写入”会创建它。纯读取操作永远不会进行写入。
+ *  - 诚实拒绝原则 (Honest refusal) (owner: refuse-honestly ruling):
+ *    如果伴随文件记录的版本戳比当前应用构建版本更“新”（即降级场景 — 用户回退了
+ *    应用程序版本），则图谱家族的读取操作会“抛出异常 (THROW)”。
+ *    “读取-修改-写入 (Read-modify-write)” 的存储绝不能重写它们无法理解的数据；
+ *    账本存储 (ledger store) 也绝不能默默跳过那些它无法解析为当前格式数据的行。
  *
- * Version constants: contracts/graph.ts CURRENT_GRAPH_FORMAT_VERSION.
+ * 版本常量存放处: contracts/graph.ts 中的 CURRENT_GRAPH_FORMAT_VERSION。
  */
 
 import fs from "node:fs";
@@ -23,36 +23,45 @@ import path from "node:path";
 import { GRAPH_FORMAT_FILE } from "../../config.ts";
 import { CURRENT_GRAPH_FORMAT_VERSION } from "../core/contracts/graph.ts";
 
+/**
+ * 获取当前记录的版本戳。
+ * @returns 整数版本号，如果文件不存在或解析失败则返回 null。
+ */
 function stampedVersion(): number | null {
 	let raw: string;
 	try {
 		raw = fs.readFileSync(GRAPH_FORMAT_FILE, "utf-8");
 	} catch {
-		return null; // no sidecar — the lazy-v1 pre-stamp world
+		return null; // 没有伴随文件 — 属于惰性 v1 (印记出现前) 的世界
 	}
 	try {
 		const parsed = JSON.parse(raw) as { version?: unknown };
 		return typeof parsed.version === "number" && Number.isInteger(parsed.version) ? parsed.version : null;
 	} catch {
-		return null; // corrupt sidecar reads as unstamped (v1), not fatal
+		return null; // 损坏的伴随文件被视为无印记 (v1)，不是致命错误
 	}
 }
 
-/** READ-SIDE GUARD: throws when the data dir was written by a NEWER build.
- *  Called by every graph-family read — never writes (the golden fixtures
- *  pin reads as byte-identical). */
+/**
+ * 读取端守卫 (READ-SIDE GUARD)：当数据目录由更新版本的应用构建写入时抛出异常。
+ * 每一个图谱家族的读取操作都会调用它 — 绝不会进行写入（黄金测试固定数据 (golden fixtures)
+ * 强制要求读取必须是字节一致的）。
+ */
 export function assertGraphFormat(): void {
 	const v = stampedVersion();
 	if (v !== null && v > CURRENT_GRAPH_FORMAT_VERSION) {
 		throw new Error(
-			`Graph data is stamped with format version ${v}, but this build understands only ${CURRENT_GRAPH_FORMAT_VERSION}. ` +
-				"The app is older than its data — upgrade the app before touching the knowledge map.",
+			`图谱数据版本戳为格式版本 ${v}，但当前应用构建仅支持 ${CURRENT_GRAPH_FORMAT_VERSION}。` +
+				"当前应用版本老于其数据 — 在操作知识图谱之前，请先升级应用。",
 		);
 	}
 }
 
-/** WRITE-SIDE STAMP: creates the sidecar on the first graph-family write
- *  (lazy); afterwards a no-op existence-wise. Callers keep their own mkdir. */
+/**
+ * 写入端印记 (WRITE-SIDE STAMP)：在图谱家族发生首次写入时创建伴随文件
+ * (采用惰性模式)；在这之后，只要文件存在就相当于空操作 (no-op)。
+ * 调用者负责维护自己的 mkdir。
+ */
 export function ensureGraphFormat(): void {
 	if (stampedVersion() !== null) return;
 	fs.mkdirSync(path.dirname(GRAPH_FORMAT_FILE), { recursive: true });

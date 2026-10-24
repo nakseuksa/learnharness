@@ -1,35 +1,30 @@
 /**
- * GraphStore — the fs JSONL adapter: the append-only ledgers at
- * config.LEDGER_FILES (contracts.ts "v1 emission").
- *   nodes.jsonl     GraphNode        — one line per node write: the FIRST
- *                                      line for an id defines it; a later
- *                                      line with a REPEATED id is a
- *                                      link-append (session phrasings join
- *                                      aliases, provenance unions); reads
- *                                      merge by id (core/graph.ts getGraph)
- *   chains.jsonl    GraphChain       — one line per chain ASSERTION (a second
- *                                      session asserting the same
- *                                      (premises, conclusion) appends
- *                                      another line; readers merge)
- *   sessions.jsonl  SessionCheckpoint— emission checkpoints (foldedAt)
- *   coverage.jsonl  CoverageEntry    — per-message extraction coverage
+ * GraphStore — 基于文件系统的 JSONL 适配器：位于 config.LEDGER_FILES
+ * 的仅追加 (append-only) 账本 (对应 contracts.ts 中的 "v1 emission")。
+ *   nodes.jsonl     GraphNode        — 每次节点写入占一行：同一 ID 的**第一行**定义该节点；
+ *                                      之后带有**重复** ID 的行表示一次链接追加 (link-append)
+ *                                      (会话措辞会被加入到 aliases 中，出处(provenance)会进行合并)；
+ *                                      读取时会根据 ID 进行合并 (详见 core/graph.ts 中的 getGraph)
+ *   chains.jsonl    GraphChain       — 每次推理链断言 (chain ASSERTION) 占一行 (如果有第二个会话
+ *                                      断言了相同的 (premises, conclusion) 前提与结论，则会追加
+ *                                      新的一行；读取器负责合并它们)
+ *   sessions.jsonl  SessionCheckpoint— 提取生成的检查点记录 (包含 foldedAt)
+ *   coverage.jsonl  CoverageEntry    — 每条消息对应的提取覆盖率 (extraction coverage) 数据
  *
- * CHAINS-PRIMARY (owner, 2026-09-30): there is NO edges ledger — the edge
- * view (implication nodes + untyped arrows) is derived in core/graph.ts on
- * every read and never persisted. A stale edges.jsonl left by a pre-chains
- * build is deleted once, here, at adapter load (same doctrine as the
- * events-ledger purge below).
+ * CHAINS-PRIMARY (推理链主导原则) (owner, 2026-09-30): **没有**边 (edges) 账本 — 边视图
+ * (包含 implication 节点和无类型箭头) 是每次读取时在 core/graph.ts 中计算得出的，永远不会持久化。
+ * 适配器加载时，会在此处一次性清理掉由引入推理链功能前 (pre-chains) 的旧版本遗留下来的
+ * 废弃的 edges.jsonl 文件 (这与下方清理 events-ledger 的规范相同)。
  *
- * Plus config.SOURCES_FILE (sources.json): the imported-notes bookkeeping
- * (NOT a ledger) — one JSON map, src-id → NotesSource, read-modify-write
- * like a chat file. The format-agnostic front door (2026-09-13).
+ * 另外还有 config.SOURCES_FILE (sources.json): 导入笔记的簿记文件
+ * (这**不是**账本) — 它是一个简单的 JSON 映射: src-id → NotesSource，
+ * 采用类似聊天文件的“读取-修改-写入”模式。这是独立于格式的统一入口 (2026-09-13)。
  *
- * Implements core/ports.ts GraphStore. data/graph/* is exclusively this
- * adapter's. Reads are strict against the contracts.ts shapes (the 2026-09-02
- * graph redesign): corrupt lines are skipped, never guessed at — the ledgers
- * are the source of truth and everything else is derived (core/graph.ts,
- * which takes this port as a parameter). Same idioms as src/store/chats.ts:
- * sync fs, no framework.
+ * 实现了 core/ports.ts 中的 GraphStore 接口。 data/graph/* 目录完全由该适配器独占管理。
+ * 读取操作严格遵循 contracts.ts 定义的形状 (基于 2026-09-02 的图谱重构)：损坏的行会被跳过，
+ * 绝不会进行猜测 — 账本是唯一的真相来源 (source of truth)，其他一切数据均由此推导而来
+ * (由接收该端口作为参数的 core/graph.ts 负责推导)。
+ * 编程风格与 src/store/chats.ts 相同：采用同步的文件系统操作，不依赖任何框架。
  */
 
 import * as fs from "node:fs";
@@ -48,11 +43,11 @@ import type {
 } from "../core/contracts.ts";
 import type { GraphStore } from "../core/ports.ts";
 
-// ─── JSONL primitives ────────────────────────────────────────────────────────
+// ─── JSONL 基础操作原语 (JSONL primitives) ────────────────────────────────────────────────────────
 
 function appendLine<T>(file: string, record: T): void {
 	fs.mkdirSync(path.dirname(file), { recursive: true });
-	ensureGraphFormat(); // the lazy format stamp (graph-format.ts)
+	ensureGraphFormat(); // 惰性格式印记 (graph-format.ts)
 	fs.appendFileSync(file, `${JSON.stringify(record)}\n`, "utf-8");
 }
 
@@ -61,7 +56,7 @@ function readRawLines(file: string): unknown[] {
 	try {
 		raw = fs.readFileSync(file, "utf-8");
 	} catch {
-		return []; // no ledger yet — nothing has ever been emitted
+		return []; // 尚未建立账本 — 从未进行过数据生成 (emission)
 	}
 	const out: unknown[] = [];
 	for (const line of raw.split("\n")) {
@@ -70,8 +65,8 @@ function readRawLines(file: string): unknown[] {
 		try {
 			out.push(JSON.parse(trimmed));
 		} catch {
-			// Corrupt line: skip rather than fail the whole read — a torn
-			// append must never take the home graph down with it.
+			// 损坏的行：直接跳过，而不是让整个读取操作失败 —
+			// 一次被截断 (torn) 的追加操作绝不能让整个基础图谱崩溃。
 		}
 	}
 	return out;
@@ -83,13 +78,17 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 const isString = (v: unknown): v is string => typeof v === "string";
 
-/** Strict shape guards — anything not matching a W4 ledger shape is skipped. */
+/**
+ * 严格的数据结构守卫 (Strict shape guards) — 任何不符合 W4 账本结构的行都会被跳过。
+ */
 function readValid<T>(file: string, isValid: (v: unknown) => v is T): T[] {
-	assertGraphFormat(); // honest refusal on a newer-stamped data dir
+	assertGraphFormat(); // 基于较新版本戳数据目录的诚实拒绝 (honest refusal)
 	return readRawLines(file).filter(isValid);
 }
 
-/** Provenance points are (chatId, messageId) pairs — message-granular. */
+/**
+ * 数据出处点 (Provenance points) 是由 (chatId, messageId) 组成的元组 — 具备消息级别的颗粒度。
+ */
 const isProvenancePoint = (v: unknown): v is ProvenancePoint =>
 	isRecord(v) && isString(v.chatId) && isString(v.messageId);
 
@@ -105,10 +104,12 @@ const isGraphNode = (v: unknown): v is GraphNode =>
 	Array.isArray(v.provenance) &&
 	v.provenance.every(isProvenancePoint);
 
-/** A chain line: premises ≥ 1 (a chain IS an argument — bare propositions
- *  ride the node ledger alone), every member a string, conclusion a string.
- *  Endpoint EXISTENCE is the derivation's concern (it drops dangling
- *  chains); the store only shapes. */
+/**
+ * 推理链的单行数据：premises (前提) ≥ 1 (一个 chain 就是一个论点论证 — 而那些孤立的命题
+ * 仅单独存在于节点账本 (node ledger) 中)，其中每个成员必须是字符串，且 conclusion (结论) 也是字符串。
+ * 端点是否存在的校验 (Endpoint EXISTENCE) 是数据推导层 (derivation) 的责任 (它会丢弃孤立悬空的链)；
+ * 存储层这里只负责校验数据形态 (shapes)。
+ */
 const isGraphChain = (v: unknown): v is GraphChain =>
 	isRecord(v) &&
 	isString(v.id) &&
@@ -126,21 +127,24 @@ const isCheckpoint = (v: unknown): v is SessionCheckpoint =>
 const isCoverageEntry = (v: unknown): v is CoverageEntry =>
 	isRecord(v) && isString(v.chatId) && isString(v.fp) && typeof v.tokens === "number" && isString(v.foldedAt);
 
-// ─── the port implementation ────────────────────────────────────────────────
+// ─── 端口实现 (the port implementation) ────────────────────────────────────────────────
 
 export const graphStore: GraphStore = {
 	appendNode(node: GraphNode): void {
 		appendLine(LEDGER_FILES.nodes, node);
 	},
-	/** Raw node lines in append order. A node id may appear on more than
-	 *  one line (a later session's LINK-append: phrasings + provenance); the
-	 *  derivation (core/graph.ts getGraph) merges lines by id. */
+	/**
+	 * 按照追加顺序返回原始的节点行数据。同一个节点 ID 可能会出现在多行中
+	 * (例如后来的会话进行了 LINK-append：追加了措辞 phrasing 和出处 provenance)；
+	 * 数据推导层 (core/graph.ts getGraph) 会负责按 ID 对行进行合并。
+	 */
 	readNodes(): GraphNode[] {
 		return readValid(LEDGER_FILES.nodes, isGraphNode);
 	},
 
-	/** Append one chain ASSERTION; readers merge lines by (premises,
-	 *  conclusion). */
+	/**
+	 * 追加一个推理链断言 (chain ASSERTION)；读取器会按 (premises, conclusion) 进行合并。
+	 */
 	appendChain(assertion: GraphChain): void {
 		appendLine(LEDGER_FILES.chains, assertion);
 	},
@@ -162,9 +166,11 @@ export const graphStore: GraphStore = {
 		return readValid(LEDGER_FILES.coverage, isCoverageEntry);
 	},
 
-	// ── imported-notes bookkeeping (config.SOURCES_FILE — a JSON map) ──
+	// ── 导入笔记簿记 (imported-notes bookkeeping, config.SOURCES_FILE — 一个 JSON 映射) ──
 
-	/** Upsert: keeps the existing record's usage log when re-importing. */
+	/**
+	 * 插入或更新 (Upsert): 在重新导入时，保留现有记录的使用日志 (usage log)。
+	 */
 	upsertSource(source: NotesSource): void {
 		const all = readSourceMap();
 		const prev = all[source.id];
@@ -174,7 +180,9 @@ export const graphStore: GraphStore = {
 	readSources(): NotesSource[] {
 		return Object.values(readSourceMap());
 	},
-	/** Idempotent per startedAt — same discipline as chats.appendExtractionUsage. */
+	/**
+	 * 按 startedAt 保证幂等性 (Idempotent per startedAt) — 与 chats.appendExtractionUsage 遵循相同的原则。
+	 */
 	appendSourceUsage(id: string, entry: ExtractionRunUsage): void {
 		const all = readSourceMap();
 		const source = all[id];
@@ -185,7 +193,7 @@ export const graphStore: GraphStore = {
 		writeSourceMap(all);
 	},
 
-	// ── the layout ledger (config.POSITIONS_FILE — a JSON map) ──
+	// ── 布局账本 (the layout ledger, config.POSITIONS_FILE — 一个 JSON 映射) ──
 	readPositions(): Record<string, Position> {
 		return readPositionMap();
 	},
@@ -193,12 +201,12 @@ export const graphStore: GraphStore = {
 		writePositionMap(positions);
 	},
 
-	/** THE DESTRUCTIVE SEAM (wave 6 session deletion): atomic full-content
-	 *  replacement per provided ledger — write a uniquely-named temp file
-	 *  beside the ledger, then rename over it (POSIX-atomic: a crash mid-
-	 *  write leaves the original ledger and an orphan .tmp-*, never a torn
-	 *  ledger). Empty arrays write an empty file — a purged ledger reads
-	 *  as "nothing yet", same as never-emitted. */
+	/**
+	 * 破坏性接缝 (THE DESTRUCTIVE SEAM) (wave 6 会话删除机制): 对于提供的每个账本进行原子级的完整内容替换 —
+	 * 在原账本旁边写入一个具有唯一名称的临时文件，然后将其重命名覆盖原文件 (符合 POSIX 原子性操作：
+	 * 若在写入中途发生崩溃，会保留原始账本以及一个孤立的 .tmp-* 临时文件，绝不会出现被破坏截断的账本)。
+	 * 空数组会写入一个空文件 — 一个被清空的账本读取时表现为“尚未建立 (nothing yet)”，这与从未生成过数据是等同的。
+	 */
 	rewriteLedgers(next: {
 		nodes?: GraphNode[];
 		chains?: GraphChain[];
@@ -216,8 +224,8 @@ export const graphStore: GraphStore = {
 			fs.mkdirSync(path.dirname(file), { recursive: true });
 			const tmp = `${file}.tmp-${crypto.randomUUID().slice(0, 8)}`;
 			try {
-				// JSONL: one record per line, trailing newline — a reader
-				// must see exactly what appendLine would have written.
+				// JSONL 格式：每行一条记录，尾部换行 —
+				// 读取器必须能看到与使用 appendLine 逐行追加时完全一致的内容。
 				const body = records.map((record) => JSON.stringify(record)).join("\n") + (records.length > 0 ? "\n" : "");
 				fs.writeFileSync(tmp, body, "utf-8");
 				fs.renameSync(tmp, file);
@@ -233,17 +241,19 @@ export const graphStore: GraphStore = {
 	},
 };
 
-/** positions.json — { positions, updatedAt }. Read-modify-write, NOT
- *  append-only: the settle is a full-graph computation, so it replaces the
- *  whole map. The updatedAt stamp exists for future live-physics conflict
- *  handling (a browser commit must be able to detect "the graph changed
- *  underneath me"); reads just return the map. */
+/**
+ * positions.json — 结构为 { positions, updatedAt }。
+ * 它是“读取-修改-写入 (Read-modify-write)” 的，而非“仅追加 (append-only)”：
+ * 布局结算 (settle) 是一个全图谱级的计算，因此它会替换整个映射表。
+ * updatedAt 戳的存在是为了未来处理实时物理冲突 (live-physics conflict)
+ * （浏览器的提交必须能够检测到“底层的图谱已经发生了改变”）；读取时只返回映射表即可。
+ */
 function readPositionMap(): Record<string, Position> {
 	let raw: string;
 	try {
 		raw = fs.readFileSync(POSITIONS_FILE, "utf-8");
 	} catch {
-		return {}; // no ledger yet — nothing has ever settled
+		return {}; // 尚未建立账本 — 从未进行过布局结算
 	}
 	try {
 		const parsed: unknown = JSON.parse(raw);
@@ -260,9 +270,9 @@ function readPositionMap(): Record<string, Position> {
 
 function writePositionMap(positions: Record<string, Position>): void {
 	fs.mkdirSync(path.dirname(POSITIONS_FILE), { recursive: true });
-	// Tmp + rename — the same crash-safety rewriteLedgers uses two blocks
-	// up (a9339b3 UI flag): a torn write must never replace the ledger
-	// with a half-written file the reader parses as empty.
+	// 采用 Tmp + rename (临时文件加重命名) — 与上面的 rewriteLedgers
+	// 使用相同的防崩溃安全机制 (a9339b3 UI 标志)：
+	// 绝不能让一次被截断的写入操作把一个半成品的空文件替换掉原有的账本。
 	const tmp = `${POSITIONS_FILE}.tmp-${crypto.randomUUID().slice(0, 8)}`;
 	try {
 		fs.writeFileSync(tmp, JSON.stringify({ positions, updatedAt: new Date().toISOString() }, null, "\t"), "utf-8");
@@ -280,10 +290,13 @@ function writePositionMap(positions: Record<string, Position>): void {
 const isPosition = (v: unknown): v is Position =>
 	isRecord(v) && typeof v.x === "number" && Number.isFinite(v.x) && typeof v.y === "number" && Number.isFinite(v.y);
 
-/** sources.json — { id: NotesSource }. Read-modify-write, NOT append-only:
- *  the usage log lives inside the record (like a chat's JSON file). */
+/**
+ * sources.json — 结构为 { id: NotesSource }。
+ * 它是“读取-修改-写入 (Read-modify-write)”，而非“仅追加”：
+ * 使用量日志 (usage log) 保存在记录内部 (类似于聊天的 JSON 文件)。
+ */
 function readSourceMap(): Record<string, NotesSource> {
-	assertGraphFormat(); // honest refusal on a newer-stamped data dir
+	assertGraphFormat(); // 基于较新版本戳数据目录的诚实拒绝 (honest refusal)
 	let raw: string;
 	try {
 		raw = fs.readFileSync(SOURCES_FILE, "utf-8");
@@ -305,13 +318,13 @@ function readSourceMap(): Record<string, NotesSource> {
 
 function writeSourceMap(map: Record<string, NotesSource>): void {
 	fs.mkdirSync(path.dirname(SOURCES_FILE), { recursive: true });
-	ensureGraphFormat(); // the lazy format stamp (graph-format.ts)
+	ensureGraphFormat(); // 惰性格式印记 (graph-format.ts)
 	fs.writeFileSync(SOURCES_FILE, JSON.stringify(map, null, "\t"), "utf-8");
 }
 
-// ─── one-way purges at adapter load: dead ledgers are exactly the confusion
-// the cleanup removes (owner doctrine — nothing reads them, nothing writes
-// them, a stale file lying around is a lie). ────────────────────────────────
+// ─── 适配器加载时的单向清理工作 (one-way purges at adapter load):
+// 清理这些废弃的账本正是为了消除困扰 (遵循所有者信条 owner doctrine —
+// 它们既不被读取，也不被写入，一个静静躺在那里的废弃文件本身就是一个谎言)。 ────────────────────────────────
 {
 	const graphDir = path.dirname(LEDGER_FILES.nodes);
 	for (const legacy of ["edges.jsonl", "events.jsonl"]) {
