@@ -31,6 +31,17 @@ const MAX_COORD = 1e6;
  * sanitized positions actually persisted (empty object = nothing written,
  * e.g. a body with no known ids — the caller reports but never fails).
  */
+/**
+ * 处理 PUT /api/graph/positions 的节点坐标持久化请求。
+ * 客户端渲染器在完成拖拽并退火达到静止状态后提交新的节点位置。
+ * 该函数负责清理与验证这些坐标，仅保存图谱中已知的节点 ID，同时抛弃或限制非法坐标。
+ *
+ * 若在拖动期间有新的节点提取并合并到图谱中，该函数会调用 `settleGraphLayout`，
+ * 以客户端提交的位置为锚点进行一次增量的布局调整。
+ *
+ * @param input 客户端提交的原始请求体数据 (通常是 节点ID -> {x, y} 的映射)。
+ * @returns 经过验证并真实持久化的坐标映射。如果输入无效或没有已知节点，则返回空对象。
+ */
 export function commitPositions(input: unknown): Record<string, Position> {
 	if (typeof input !== "object" || input === null) return {};
 	const raw = input as Record<string, unknown>;

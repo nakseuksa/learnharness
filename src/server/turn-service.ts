@@ -47,6 +47,18 @@ import { ModelsNotConfiguredError, ProviderKeyMissingError } from "../core/setti
  *
  * Returns the stamped new messages (usage provenance reads them).
  */
+/**
+ * 结算并持久化当前对话回合的消息。
+ * 该函数计算合并后的新消息切片，通过分配新的 ID（如果提供商未返回），
+ * 最终与原始数据拼接并写入后端存储。同时触发相应的改变事件。
+ *
+ * @param chatStore 用于访问和保存记录的存储接口。
+ * @param chatId 会话的唯一标识符。
+ * @param baseLength 回合开始时的历史消息长度（用于裁剪出本回合的新增消息）。
+ * @param turnMessages 包含新回合生成的所有消息列表。
+ * @param isAborted 标记此回合是否被外部手动终止。
+ * @returns 返回这回合产生的新消息切片。
+ */
 export function persistTurn(
 	chatStore: ChatStore,
 	chatId: string,
@@ -96,6 +108,16 @@ export function persistTurn(
  * Deliberately isolated in this one seam — the pipeline is
  * trigger-agnostic. Skipped under tests: scripted chats are fixtures, not
  * knowledge (the pipeline itself is tested directly with mock models).
+ */
+/**
+ * 触发会话中知识图谱数据的异步提取过程。
+ * 它根据配置中定义的 Chunk Tokens 预算上限，计算距离上次提取的新增消息量。
+ * 如果达到预算阈值，则将该任务压入提取管线的注册表。如果超过预算两倍，则强制即时提交（而不是分批排队）。
+ *
+ * @param deps 提供核心数据访问与管线功能的依赖集。
+ * @param extraction 提取管线的操作句柄。
+ * @param chatId 需要进行知识图谱提取的会话 ID。
+ * @param chunkTokens 每次批量提取期望的预算 Token 上限（由设置定义）。
  */
 export function triggerExtraction(
 	deps: { chatStore: ChatStore; graphStore: GraphStore },

@@ -123,11 +123,20 @@ function state(): WakeState {
 }
 
 /** chat-handler wires this at module init: its adapter around handleChatRequest. */
+/**
+ * 注入服务器端的后台 Agent 回合运行器。
+ * 当需要通过 idle wake 机制自动推进一个回合（处理排队的 steers）时使用。
+ * @param run 负责启动对话回合的函数。
+ */
 export function setTurnRunner(run: TurnRunner): void {
 	state().turnRunner = run;
 }
 
 /** chat-handler wires this at module init: its job runner's runJob. */
+/**
+ * 注入后台任务复活机制（当系统崩溃重启后恢复正在运行但已死掉的任务）。
+ * @param respawn 负责重新生成任务实例的函数。
+ */
 export function setJobRespawn(respawn: JobRespawn): void {
 	state().respawn = respawn;
 }
@@ -172,6 +181,11 @@ function jobIdOf(steer: SteerMessage): string | null {
  *  idempotent, so the later flip is a no-op. Owner ruling (2026-09-26): a
  *  delivered subagent leaves the background dock the moment its result is
  *  visible, not when the teacher's turn ends. */
+/**
+ * 标记特定 steer（来自后台任务的结果）已向用户可见，即已被渲染。
+ * 此时就可以把关联的任务状态从 "running" 转换为 "done/failed"。
+ * @param steer 操控消息。
+ */
 export function noteSteerVisible(steer: SteerMessage): void {
 	finalizeSteer(steer);
 }
@@ -191,6 +205,12 @@ function failSteer(steer: SteerMessage, err: Error): void {
 /** Queue ANY steer (result, abort, probe handoff) through the pipeline.
  *  Resolves when the wake turn has completed; rejects when delivery fails
  *  unrecoverably. Never rejects for queueing itself. */
+/**
+ * 将后台任务的结果（打包成 SteerMessage）投递给对应的聊天对话。
+ * 该函数负责排队投递请求，然后启动队列泵处理这些操控消息（或者递交给活跃运行的回合，或者作为独立回合驱动）。
+ * @param steer 包含任务结果和目标关联信息的操控消息。
+ * @returns 当该 steer 已确认送达且持久化（或者遇到不可恢复的错误）时，Promise 才会 resolve/reject。
+ */
 export function deliverJobResult(steer: SteerMessage): Promise<void> {
 	return new Promise<void>((resolve, reject) => {
 		const s = state();
@@ -241,6 +261,12 @@ function handOffEligible(chatId: string, agent: Agent): void {
  *  markers are steered into the run right here. The settle seam cannot
  *  beat the registration: settlement needs a streamed response, which
  *  never happens inside the constructor call. */
+/**
+ * 注册一个正在当前会话中运行的活跃 Agent 实例。
+ * 这样就可以将排队的操控消息（Steer）实时递交给它，而无需等待它结束。
+ * @param chatId 会话 ID。
+ * @param agent 活跃的 Pi Agent 实例。
+ */
 export function registerLiveAgent(chatId: string, agent: Agent): void {
 	state().liveAgents.set(chatId, agent);
 	handOffEligible(chatId, agent);
@@ -262,6 +288,13 @@ export interface UserSteerEntry {
  *  is the stranding safety net: if this agent dies undelivered (question
  *  termination, abort), reconcileUserSteers keeps it parked for the
  *  chat's next run. */
+/**
+ * 用户主动发送的新鲜内容，尝试动态投递给正在运行的对话 Agent。
+ * 如果存在支持 Composer（合成器）机制的活跃 Agent，它将消耗这个消息并返回 true。
+ * @param chatId 目标对话会话 ID。
+ * @param message 要投递的消息。
+ * @returns 是否成功动态投递给了活跃 Agent。
+ */
 export function steerLiveChat(chatId: string, message: LhMessage): boolean {
 	const agent = state().liveAgents.get(chatId);
 	if (!agent) return false;
@@ -278,6 +311,12 @@ export function steerLiveChat(chatId: string, message: LhMessage): boolean {
  *  (the record holds them); undelivered stay parked for the next run.
  *  Memory-only by design (same tradeoff as job markers): a server
  *  restart drops parked steers — and the whole turn dies with it anyway. */
+/**
+ * 调和用户端的 steer 数据：当活跃回合结束且消息被持久化后，检查哪些用户投递的
+ * steer 真正落盘了，清理已送达的条目，未送达的保留在队列供下次重试。
+ * @param chatId 会话 ID。
+ * @param persisted 当前已持久化的最新消息列表。
+ */
 export function reconcileUserSteers(chatId: string, persisted: readonly LhMessage[]): void {
 	const q = state().userSteers.get(chatId);
 	if (!q || q.length === 0) return;
@@ -289,6 +328,10 @@ export function reconcileUserSteers(chatId: string, persisted: readonly LhMessag
 
 /** Clear the live agent at settlement — MUST run before settleSteers so the
  *  reconciliation's re-pump can never hand a marker to the dying agent. */
+/**
+ * 注销当前活跃运行的 Agent。在回合结束或者因错误崩溃时调用。
+ * @param chatId 会话 ID。
+ */
 export function unregisterLiveAgent(chatId: string): void {
 	state().liveAgents.delete(chatId);
 }
@@ -306,6 +349,13 @@ export function unregisterLiveAgent(chatId: string): void {
  * This is what makes the live hand-off safe: pi owns no retry for a marker
  * stranded in a settled agent's queue, so the registry stays the truth and
  * the dead agent's copy is simply abandoned (GC'd with the agent). */
+/**
+ * 回合结束时的最终调和机制：它会对比投递队列中“已递交给上一个回合”的消息
+ * 是否存在于新持久化的记录中。在记录中存在的会被标记完成；丢失的（如由于运行中断）
+ * 则取消其递交标记，并重新唤醒 `pump` 处理它们。
+ * @param chatId 会话 ID。
+ * @param persisted 本回合持久化落地的消息片段。
+ */
 export function settleSteers(chatId: string, persisted: { id?: string }[]): void {
 	const queue = state().queues.get(chatId);
 	if (!queue || queue.length === 0) return;
@@ -360,6 +410,12 @@ export interface AbortOutcome {
  *
  * The runner writes the usage folded so far in its finally (merge patch),
  * so an aborted job's money record survives the kill.
+ */
+/**
+ * 用户发起主动中断（Abort）后台任务的请求处理函数。
+ * 任务会被标记为 abort（这会自动终止任务底层的执行），如果该任务还没有结果，就产生一个 abort 类型的 steer 传递给对话。
+ * @param jobId 要中断的任务 ID。
+ * @returns 中断操作的结果及其详情。
  */
 export function abortJob(jobId: string): AbortOutcome {
 	const job = stores.jobStore.getJob(jobId);
@@ -644,6 +700,10 @@ const SWEEP_THROTTLE_MS = 30_000;
  */
 /** Re-run a job's sub-agent loop — exposed for the sweep's tests (the
  *  /api/jobs poll is its only production caller, disabled under NODE_ENV=test). */
+/**
+ * 恢复过期的作业。该操作会被限流，并通过轮询端点定期被触发。
+ * 它会识别 "running" 状态但实际上由于进程崩溃等原因死掉的任务，并尝试重新发起交付，或者利用 `respawn` 恢复任务的运行循环。
+ */
 export function recoverStaleJobs(): void {
 	const s = state();
 	const now = Date.now();
@@ -677,6 +737,12 @@ export function recoverStaleJobs(): void {
 }
 
 /** The /api/jobs entry: job list for the client poll (+ lazy recovery). */
+/**
+ * 获取指定会话中的所有任务记录，为客户端 `/api/jobs` 端点服务。
+ * （该函数也会懒触发一次 `recoverStaleJobs` 以尝试修复陈旧任务）
+ * @param chatId 会话的唯一标识符。
+ * @returns 该会话关联的所有任务记录。
+ */
 export function listJobs(chatId: string): JobRecord[] {
 	if (process.env.NODE_ENV !== "test") recoverStaleJobs();
 	return stores.jobStore.listJobs(chatId);

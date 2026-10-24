@@ -44,12 +44,26 @@ function registry(): Map<string, ParkedDismissal> {
 
 /** Park (or overwrite) the chat's dismissal intent. Called by the dismiss
  *  route when a turn owns the chat. */
+/**
+ * 暂存（或覆盖）指定会话的取消（dismissal）意图。
+ * 当 `dismiss` 路由发现对话正在运行时，它会调用此函数将会话的取消动作暂存。
+ *
+ * @param chatId 会话的唯一标识符。
+ * @param input 暂存的取消动作负载（包含要被取消的 ID 和数据）。
+ */
 export function parkDismissal(chatId: string, input: ParkedDismissal): void {
 	registry().set(chatId, input);
 }
 
 /** Take the chat's parked dismissal (removes it). Returns null when
  *  nothing is parked. */
+/**
+ * 获取并移除指定会话暂存的取消意图。
+ * 如果没有暂存的意图，则返回 null。
+ *
+ * @param chatId 会话的唯一标识符。
+ * @returns 暂存的取消负载数据，或者 null。
+ */
 export function takeParkedDismissal(chatId: string): ParkedDismissal | null {
 	const parked = registry().get(chatId);
 	if (parked === undefined) return null;
@@ -64,6 +78,14 @@ export function takeParkedDismissal(chatId: string): ParkedDismissal | null {
  *  ChatInputError means the dismissed thing never materialized — the park
  *  is dropped, silence is the correct outcome. Emits "record-changed"
  *  exactly when something was written. */
+/**
+ * 将指定会话中暂存的取消意图应用到当前会话的持久化记录中。
+ * 这个函数在会话回合完成阶段（onFinish）被调用——在回合结果保存（persistTurn）之后、结束标记（endTurn）之前。
+ * 如果在验证时抛出 `ChatInputError`，说明暂存的取消目标从未存在，静默丢弃即可。
+ *
+ * @param chatStore 负责读写聊天记录的存储模块。
+ * @param chatId 会话的唯一标识符。
+ */
 export function applyParkedDismissal(chatStore: ChatStore, chatId: string): void {
 	const input = takeParkedDismissal(chatId);
 	if (input === null) return;

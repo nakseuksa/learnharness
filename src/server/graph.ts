@@ -18,6 +18,12 @@ import { stores } from "./stores.ts";
  * answers in sessions (turn-service), never from here — the home view
  * reflects whatever the pipeline has merged so far.
  */
+/**
+ * 获取图谱的只读快照视图（为 GET /api/graph 服务）。
+ * 该操作为纯读取，因为数据提取管道是唯一写入图谱的地方。
+ *
+ * @returns 序列化后的全量图谱快照。
+ */
 export function graphView(): GraphSnapshot {
 	return graphSnapshot(stores);
 }
@@ -28,6 +34,12 @@ export function graphView(): GraphSnapshot {
  *  (notes-front-door runs), and the naming ledger (graph-global runs);
  *  dollars are inferred by the pure core fold (core/cost-summary.ts +
  *  prices.ts) — nothing here stores or caches money. */
+/**
+ * 计算图谱相关的成本花销摘要（为 GET /api/graph/costs 服务）。
+ * 它遍历系统内所有的聊天记录和图谱源文件，汇总并折算成金额。
+ *
+ * @returns 图谱不同操作和模型相关的成本汇总。
+ */
 export function graphCosts(): GraphCostSummary {
 	const chats = stores.chatStore
 		.listChats()
@@ -51,6 +63,13 @@ export function graphCosts(): GraphCostSummary {
  * IS the counter. Consumers poll it (the activity feed
  *  carries it; the DELETE response returns it) to know clusters/layout
  *  must refetch — the "graph changed underneath me" signal. */
+/**
+ * 计算整个图谱的版本戳（用于通知客户端需要重新拉取数据）。
+ * 该版本号直接取所有图谱相关数据文件（节点、链、会话、覆盖率账本及坐标记录）的最大修改时间（mtime）。
+ * 只要有任何写操作改变了文件，版本戳就会递增。不存在文件时返回 0。
+ *
+ * @returns 图谱数据的最大修改时间戳。
+ */
 export function graphRevision(): number {
 	let revision = 0;
 	for (const file of [
@@ -99,6 +118,15 @@ export type NodeDeleteOutcome =
  *     ledgers, mints a fresh node for a re-taught topic, and
  *     mergeFindings ignores linkTo ids that no longer exist (the
  *     existingIds guard) — no dangling edges, no resurrection.
+ */
+/**
+ * 根据 ID 彻底删除单个图谱节点（包括清理与之相关的所有关联账本记录）。
+ * 删除操作是原子且同步执行的，以确保不会发生数据一致性问题。
+ * 如果当前后台有提取任务在运行，为了避免提取任务在稍后重新注入相关数据或关联不再存在的边，
+ * 会拒绝该删除请求并返回 409。
+ *
+ * @param nodeId 需要删除的节点的唯一标识符。
+ * @returns 包含删除成功与否状态及最新图谱修订号的结果对象。
  */
 export function deleteGraphNode(nodeId: string): NodeDeleteOutcome {
 	if (extractionStatuses().length > 0) {

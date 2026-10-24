@@ -1,7 +1,7 @@
 /**
- * THE SERVER-SIDE SURFACE — the only src module (besides the core barrel)
- * that app/ may import. Route handlers and server components come through
- * here; nothing under app/ touches src/store or src/agent directly.
+ * THE SERVER-SIDE SURFACE — 这是除了 core 入口以外，唯一允许 `app/` 目录导入的后端模块。
+ * Next.js 路由处理程序（Route handlers）和服务器组件（Server components）的所有调用都通过此处导出。
+ * 严格遵守架构：`app/` 下的任何代码均不允许直接访问 `src/store` 或 `src/agent`。
  */
 
 export * from "./chat-handler.ts";

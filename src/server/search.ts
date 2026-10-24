@@ -32,6 +32,14 @@ type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
  *  JSON body. VERIFIED against docs.tavily.com's OpenAPI, 2026-09-20:
  *  response {results: [{title, url, content, score, …}]}, errors
  *  {detail: {error}}. */
+/**
+ * 构造 Tavily 搜索服务的适配器，实现了 SearchProvider 接口。
+ * 使用传入的 API Key 发起对 Tavily 的搜索请求，并限制最多返回 3 条结果。
+ *
+ * @param apiKey Tavily 服务的 API 密钥。
+ * @param fetchFn 自定义的 fetch 实现（默认为原生的 fetch），用于便于测试和注入。
+ * @returns 符合后台代理研究器要求的 SearchProvider 实例。
+ */
 export function tavilyProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchProvider {
 	return {
 		id: "tavily",
@@ -76,6 +84,15 @@ export function tavilyProvider(apiKey: string, fetchFn: FetchLike = fetch): Sear
  *  key in the X-Subscription-Token header. VERIFIED against Brave's
  *  dashboard docs, 2026-09-20: count max 20; response
  *  {web: {results: [{title, url, description, …}]}}. */
+/**
+ * 构造 Brave 搜索服务的适配器，实现了 SearchProvider 接口。
+ * 使用传入的 API Key 发起对 Brave Search 服务的请求。
+ * 如果搜索结果包含相关新闻或常见问答，将它们附加到网页搜索结果的尾部，以提供更丰富的研究素材。
+ *
+ * @param apiKey Brave Search 服务的 API 密钥。
+ * @param fetchFn 自定义的 fetch 实现。
+ * @returns 符合后台代理研究器要求的 SearchProvider 实例。
+ */
 export function braveProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchProvider {
 	return {
 		id: "brave",
@@ -127,6 +144,15 @@ function engineKey(id: SearchEngineId): string | null {
 /** Resolve the search state PURELY from the given pins (testable): the
  *  explicit engine (if pinned) wins but must be keyed; absent pin → first
  *  keyed engine in preference order. Never throws. */
+/**
+ * 解析并生成当前配置对应的搜索引擎实例（如果是活跃且有效的）。
+ * 如果系统未开启网络搜索，或者未提供有效的提供商配置，则返回 null。
+ *
+ * @param settings 当前系统的全局设置（从中读取启用的搜索提供商）。
+ * @param env 环境变量（读取具体的 API Keys）。
+ * @param fetchFn HTTP 请求的 fetch 函数，用于网络交互。
+ * @returns 若存在并配置正确的引擎适配器则返回该实例，否则为 null。
+ */
 export function resolveSearchEngineFor(
 	pinned: SearchEngineId | undefined,
 	/** Per-engine live keys (absent engine = absent property is fine). */
@@ -159,6 +185,11 @@ export function resolveSearchEngineFor(
 /** The live search state (the honest availability signal): reads the
  *  settings record's pin + the auth store fresh each call, so a key saved
  *  mid-session activates on the next check (no restart). */
+/**
+ * 获取当前全局搜索引擎配置的真实使用状态和引擎信息（用于配置页面的回显和健康检查）。
+ *
+ * @returns 返回一个包含是否可用、配置的引擎及具体配置错误原因等状态。
+ */
 export function searchStatus(): SearchStatus {
 	const { available, engine, reason } = resolveSearchEngineFor(
 		effectiveSettings().agent.search?.engine,
@@ -172,6 +203,12 @@ export function searchStatus(): SearchStatus {
 
 /** Search available at all? (the settings UI's gray-out signal + the
  *  researcher's enable/disable pin — Teacher stream's rewiring reads this.) */
+/**
+ * 检查目前是否开启了网络搜索能力。
+ * 该函数在创建各个子 Agent 或者判断是否下发 Web Search 选项时作为快速守卫。
+ *
+ * @returns 如果有效的搜索引擎已被配置，返回 true。
+ */
 export function searchAvailable(): boolean {
 	return searchStatus().available;
 }
@@ -179,6 +216,12 @@ export function searchAvailable(): boolean {
 /** The LIVE adapter, or null when unavailable. Composed fresh each call —
  *  the tool layer (Teacher stream) calls this once per search, so key
  *  rotations take effect immediately. */
+/**
+ * 提供一个当前最新生效的搜索引擎适配器，供后台执行任务时实时调用。
+ * 该函数通过组合当前配置与当前环境变量获得底层实例，以确保每次调度拿到最新配置。
+ *
+ * @returns 返回相应的 SearchProvider 适配器或 null（如果尚未配置好）。
+ */
 export function searchProvider(): SearchProvider | null {
 	const resolved = resolveSearchEngineFor(effectiveSettings().agent.search?.engine, {
 		tavily: engineKey("tavily") ?? undefined,
