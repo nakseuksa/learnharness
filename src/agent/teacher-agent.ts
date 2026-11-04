@@ -22,6 +22,7 @@ import { CLAUDE_CODE_PROVIDER } from "./claude-code/constants.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
+import { lhLog } from "../core/logger.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import type { ResolvedLocale } from "../core/settings.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
@@ -165,7 +166,7 @@ You must conduct all teaching explanations, conceptual probes, follow-up questio
  * (owner ruling 2026-09-25: no maximum-agent-turns net on the teaching
  * turn).
  */
-function makeQuestionStopper(kind: AgentKind) {
+function makeQuestionStopper(kind: AgentKind, chatId?: string) {
 	return (context: {
 		message: { content: Array<{ type: string; id?: string; name?: string }> };
 		toolResults: Array<{ toolCallId: string; isError?: boolean }>;
@@ -181,8 +182,12 @@ function makeQuestionStopper(kind: AgentKind) {
 		if (called.size === 0) return false;
 		// Stop only when every question/problem pose resolved cleanly.
 		for (const result of context.toolResults) {
-			if (called.has(result.toolCallId) && result.isError) return false;
+			if (called.has(result.toolCallId) && result.isError) {
+				lhLog("AGENT", "question stopper: pose failed validation, continuing turn so model can retry", { kind, toolCallId: result.toolCallId }, chatId);
+				return false;
+			}
 		}
+		lhLog("AGENT", "question stopper: clean question/problem posed -> ending turn to await learner", { kind, calls: [...called] }, chatId);
 		return true;
 	};
 }
@@ -193,7 +198,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// conversation-spec resolution as teaching); the cast keeps AgentKind
 	// ("practice" is not a ModelRole) honest about that.
 	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
-	const stopper = makeQuestionStopper(kind);
+	const stopper = makeQuestionStopper(kind, opts.chatId);
 	let systemPrompt = opts.promptSwitches
 		? composeInstructions(kind, opts.promptSwitches)
 		: composedInstructions[kind]!;

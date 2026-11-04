@@ -22,6 +22,8 @@
  * server, store, and agent may all depend on.
  */
 
+import { lhLog } from "./logger.ts";
+
 /** The full event vocabulary — fixed from day one (slice plan, 2026-10-02). */
 export interface ServerEvents {
 	/** A teach turn began server-side (beginTurn) — client-initiated sends,
@@ -105,7 +107,10 @@ export function subscribe(listener: ServerEventListener): () => void {
 export function emit<K extends ServerEventType>(type: K, payload: ServerEvents[K]): void {
 	// Snapshot: a listener that unsubscribes (or subscribes) mid-emit must
 	// not mutate the set under iteration.
-	for (const listener of [...listeners()]) {
+	const activeListeners = [...listeners()];
+	const chatId = (payload as { chatId?: string } | undefined)?.chatId;
+	lhLog("EVENT", `emit "${type}"`, { ...payload, listeners: activeListeners.length }, chatId);
+	for (const listener of activeListeners) {
 		try {
 			listener({ type, ...payload } as ServerEvent);
 		} catch (err) {

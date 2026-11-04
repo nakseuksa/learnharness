@@ -1,6 +1,7 @@
 import type { Agent, AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { ToolCallIdUniquifier } from "./call-ids.ts";
 import type { ChatGPTRequestCycle } from "../../agent/chatgpt-request-cycle.ts";
+import { isLogEnabled, lhLog } from "../../core/logger.ts";
 
 /**
  * THE NATIVE WIRE (Wave D, owner-approved 2026-09-26): one agent turn, streamed
@@ -70,6 +71,7 @@ export type TurnWireEvent =
 	| { type: "error"; errorText: string };
 
 export interface PiTurnSpec {
+	chatId?: string;
 	requestCycle?: ChatGPTRequestCycle;
 	/** The per-turn agent (stateless engine — built from the record). */
 	agent: Agent;
@@ -121,7 +123,7 @@ export interface PiTurnHandle {
 }
 
 export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
-	const { agent, onError, onFinish, onSettleError, onSettleFailure, usedToolCallIds, updateFlushMs = 100, requestCycle } = spec;
+	const { chatId, agent, onError, onFinish, onSettleError, onSettleFailure, usedToolCallIds, updateFlushMs = 100, requestCycle } = spec;
 	const uniquifier = usedToolCallIds ? new ToolCallIdUniquifier(usedToolCallIds) : undefined;
 
 	let settled = false;
@@ -243,6 +245,7 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 		// THE LACAN FIX: ids uniquify HERE, before any view — the one seam
 		// every consumer downstream shares. No uniquifier → verbatim.
 		const uniqued = uniquifier ? uniquifier.event(event) : event;
+		logAgentEvent(chatId, uniqued);
 		// WIRE DIET: slim the one event pi double-stuffs — our views read
 		// `message`, never `assistantMessageEvent` (same full partial twice).
 		const wire: TurnWireEvent =
@@ -364,4 +367,65 @@ export function piTurnResponse(handle: PiTurnHandle): Response {
 			"X-Accel-Buffering": "no",
 		},
 	});
+}
+
+function logAgentEvent(chatId: string | undefined, event: AgentEvent): void {
+	const scope = event.type === "message_update" || event.type === "tool_execution_update" ? "STREAM" : "AGENT";
+	if (!isLogEnabled(scope)) return;
+	switch (event.type) {
+		case "agent_start":
+			lhLog("AGENT", "agent_start", undefined, chatId);
+			break;
+		case "turn_start":
+			lhLog("AGENT", "turn_start", undefined, chatId);
+			break;
+		case "message_start": {
+			lhLog("AGENT", "message_start", { role: event.message.role }, chatId);
+			break;
+		}
+		case "message_update": {
+			const m = event.message;
+			lhLog("STREAM", "message_update", { role: m.role, blocks: Array.isArray(m.content) ? m.content.length : undefined }, chatId);
+			break;
+		}
+		case "message_end": {
+			const m = event.message;
+			const assistant = m.role === "assistant" ? m : undefined;
+			const calls = assistant && Array.isArray(assistant.content)
+				? assistant.content.filter((c) => c.type === "toolCall").map((c) => `${c.name}(${c.id})`)
+				: undefined;
+			lhLog(
+				"AGENT",
+				"message_end",
+				{
+					role: m.role,
+					stopReason: assistant?.stopReason,
+					toolCalls: calls && calls.length > 0 ? calls : undefined,
+					usage: assistant?.usage ? { in: assistant.usage.input, out: assistant.usage.output, reason: assistant.usage.reasoning } : undefined,
+				},
+				chatId,
+			);
+			break;
+		}
+		case "tool_execution_start":
+			lhLog("AGENT", "tool_execution_start", { toolName: event.toolName, toolCallId: event.toolCallId }, chatId);
+			break;
+		case "tool_execution_update":
+			lhLog("STREAM", "tool_execution_update", { toolName: event.toolName, toolCallId: event.toolCallId }, chatId);
+			break;
+		case "tool_execution_end":
+			lhLog(
+				"AGENT",
+				"tool_execution_end",
+				{ toolName: event.toolName, toolCallId: event.toolCallId, isError: event.isError },
+				chatId,
+			);
+			break;
+		case "turn_end":
+			lhLog("AGENT", "turn_end", { toolResults: event.toolResults?.length ?? 0 }, chatId);
+			break;
+		case "agent_end":
+			lhLog("AGENT", "agent_end", { totalMessages: event.messages?.length ?? 0 }, chatId);
+			break;
+	}
 }

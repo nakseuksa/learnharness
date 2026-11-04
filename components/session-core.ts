@@ -26,6 +26,7 @@ import {
 	newThinkingMessage,
 	newUserMessage,
 	projectView,
+	lhLog,
 	type ChatInput,
 	type LhMarkerMessage,
 	type LhMessage,
@@ -323,9 +324,13 @@ export class SessionModel {
 	}
 
 	private setStatus(status: SessionStatus): void {
+		const prev = this.statusValue;
 		if (status === "submitted") this.liveFailureId = null;
 		this.statusValue = status;
 		this.readyRef = status === "ready";
+		if (prev !== status) {
+			lhLog("SESSION", `status: ${prev} -> ${status}`, { base: this.base.length, tail: this.tail.length }, this.chatId);
+		}
 		this.onChange?.();
 	}
 
@@ -504,6 +509,7 @@ export class SessionModel {
 					// The raced-settle terminal: no turn to attach to — the
 					// record is current; the settle hook refetches.
 					sawDone = true;
+					lhLog("SESSION", "SSE received turn-settled -> refetching record", undefined, this.chatId);
 					this.onReattachSettled?.();
 					return;
 				}
@@ -658,6 +664,7 @@ export class SessionModel {
 		this.consumeAbort = controller;
 		this.latestRequest = controller;
 		this.setError(null);
+		lhLog("SESSION", `▶ send(${input.type})`, { base: this.base.length, tail: this.tail.length }, this.chatId);
 		this.setStatus("submitted");
 		if (recovering && input.type === "answer") {
 			try {
@@ -943,11 +950,16 @@ export class SessionModel {
 		const recordIds = new Set(record.map((m) => (m as { id?: string }).id));
 		const baseAbsorbed = this.base.some((m) => !recordIds.has((m as { id?: string }).id));
 		if (baseAbsorbed) return; // not a pure append — the idle full sync is the net
+		const beforeTail = this.tail.length;
 		this.mutate(() => {
 			this.base = record;
 			this.forgetResolvedDrafts(record);
 			this.tail = this.tail.filter((m) => !absorbed(m, record));
 		});
+		const absorbedCount = beforeTail - this.tail.length;
+		if (absorbedCount > 0) {
+			lhLog("SESSION", "adoptRecord absorbed optimistic messages", { absorbedCount, base: this.base.length, remainingTail: this.tail.length }, this.chatId);
+		}
 	}
 
 	/** Automatic mount/sync continuation is never permission to retry a

@@ -50,6 +50,7 @@ import { composeInstructions } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
+import { lhLog } from "../core/logger.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
 import { asAgentMessages } from "../core/native-messages.ts";
 import {
@@ -200,8 +201,20 @@ export async function handleChatInput(
 ): Promise<Response> {
 	let record = stores.chatStore.getChat(chatId);
 	if (!record) {
+		lhLog("TURN", "rejected: unknown chat", { status: 404 }, chatId);
 		return Response.json({ error: "Unknown chat" }, { status: 404 });
 	}
+	const turnStartTime = performance.now();
+	lhLog(
+		"TURN",
+		"▶ handleChatInput",
+		{
+			inputType: input.type,
+			kind: record.kind ?? "teach",
+			recordMessages: record.messages.length,
+		},
+		chatId,
+	);
 
 	// Refuse an ineligible Retry before catalog refresh, compaction, or any
 	// turn/write effects. Revalidate after the awaited gates below too.
@@ -347,6 +360,7 @@ export async function handleChatInput(
 			console.error(`[chat ${chatId}] write-ahead persist failed:`, err);
 			return new Response("Your input could not be saved. Please try again.", { status: 500 });
 		}
+		lhLog("TURN", "parallel-question gate: saved answer, deferring wake until sibling questions answered", { appends: appends.length }, chatId);
 		emit("record-changed", { chatId });
 		return settledTurnResponse(); // the cheap terminal — no beginTurn, no turn
 	}
@@ -356,6 +370,7 @@ export async function handleChatInput(
 	// double-run the teacher and clobber the first turn's persist.
 	if (!beginTurn(chatId)) {
 		console.info(`[chat ${chatId}] turn already in flight — request rejected`);
+		lhLog("TURN", "rejected: turn already in flight (409)", { inputType: input.type }, chatId);
 		return Response.json({ error: "A turn is already running for this session" }, { status: 409 });
 	}
 
@@ -462,6 +477,19 @@ export async function handleChatInput(
 	// split, no plan/question/job tools; the whole registry is
 	// problem + conclude. buildAgent stays honored (the test seam is
 	// uniform across kinds).
+	const agentRole = record.kind === "practice" ? "PRACTICE" : teaching ? "TEACHER" : "PROBER";
+	lhLog(
+		"TURN",
+		`constructing ${agentRole} agent`,
+		{
+			model: modelId,
+			thinking: engine.level ?? "default",
+			background: callPurpose.background,
+			appends: appends.length,
+			agentMessages: agentMessages.length,
+		},
+		chatId,
+	);
 	const constructed: TeachingAgent = buildAgent
 		? buildAgent({ ...agentOpts, teaching })
 		: record.kind === "practice"
@@ -544,6 +572,7 @@ export async function handleChatInput(
 		// LH_PROVIDER_EVENTS=1.
 		providerEventNote(chatId, "turn", `run start (base: ${agentMessages.length} messages)`);
 		const handle = runPiTurn({
+			chatId,
 			agent: constructed,
 			requestCycle,
 			// The coalescing window seam (COMPACTION LAW, 2026-10-09): tests
@@ -585,6 +614,23 @@ export async function handleChatInput(
 				// Wave B: append only messages past the temporary agent prefix.
 				// Retry's saved record still includes its earlier failed attempts.
 				const stamped = persistTurn(stores.chatStore, chatId, persistBaseCount, turnMessages, isAborted);
+				const totalIn = steps.reduce((acc, s) => acc + (s.inputTokens ?? 0), 0);
+				const totalOut = steps.reduce((acc, s) => acc + (s.outputTokens ?? 0), 0);
+				lhLog(
+					"TURN",
+					"✔ turn settled",
+					{
+						role: agentRole,
+						model: modelId,
+						isAborted,
+						newMessages: stamped.length,
+						llmSteps: steps.length,
+						tokensIn: totalIn,
+						tokensOut: totalOut,
+						ms: Math.round(performance.now() - turnStartTime),
+					},
+					chatId,
+				);
 				noteSteersDurable(chatId, stores.chatStore.getChat(chatId)?.messages ?? stamped);
 				// usage log append (idempotent per turn id) — the stats bar
 				// refolds this on the client after the turn settles. The

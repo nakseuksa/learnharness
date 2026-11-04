@@ -12,14 +12,25 @@ import { sourceOrganizationStore } from "../store/source-organization.ts";
 import { jobStore } from "../store/jobs.ts";
 import { settingsStore } from "../store/settings.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
+import { traceObject } from "../core/logger.ts";
 import { syncCustomProvider } from "./custom-provider.ts";
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally. */
 export const stores = {
-	chatStore,
-	graphStore,
-	sourceOrganizationStore,
-	jobStore,
-	settingsStore,
+	chatStore: traceObject("STORE", "chatStore", chatStore, {
+		exclude: new Set(["getChat", "listChats"]),
+	}),
+	graphStore: traceObject("STORE", "graphStore", graphStore, {
+		exclude: new Set(["readNodes", "readChains", "readCheckpoints", "readCoverage", "readSources", "readPositions"]),
+	}),
+	sourceOrganizationStore: traceObject("STORE", "sourceOrgStore", sourceOrganizationStore, {
+		exclude: new Set(["read"]),
+	}),
+	jobStore: traceObject("STORE", "jobStore", jobStore, {
+		exclude: new Set(["getJob", "listJobs", "findJobByToolCallId"]),
+	}),
+	settingsStore: traceObject("STORE", "settingsStore", settingsStore, {
+		exclude: new Set(["readSettings"]),
+	}),
 };
 
 export type Stores = typeof stores;

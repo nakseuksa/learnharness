@@ -1,6 +1,7 @@
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Static, TSchema } from "typebox";
 import { CONCLUDE_ACK_TEXT } from "../core/contracts/chat.ts";
+import { lhLog } from "../core/logger.ts";
 
 /**
  * tool-execute — the execution machinery every server-side lh tool shares,
@@ -118,6 +119,7 @@ export function invalidInputResult(
 	toolName: string,
 	problems: string[],
 ): AgentToolResult<{ tool: string; problems: string[] }> {
+	lhLog("TOOL", `invalidInputResult (${toolName}) — model will retry`, { problems });
 	return {
 		content: [
 			{
@@ -205,10 +207,23 @@ export function serverExecute<P extends TSchema>(
 	// validated arguments against `schema` (runtime) and `run` keeps the
 	// precise Static<P> input; `schema` exists in the signature precisely so
 	// P infers from the call site, not the loose surface.
-	return async (toolCallId, input: unknown, signal) =>
-		toToolResult(
-			await runWithAbortGuard(toolName, (toolSignal) => run(input as Static<P>, { toolCallId, signal: toolSignal }), signal),
-		);
+	return async (toolCallId, input: unknown, signal) => {
+		const t0 = performance.now();
+		// Arguments can contain private learner content or signed URLs.
+		lhLog("TOOL", `▶ execute ${toolName}`, undefined, toolCallId);
+		try {
+			const out = await runWithAbortGuard(
+				toolName,
+				(toolSignal) => run(input as Static<P>, { toolCallId, signal: toolSignal }),
+				signal,
+			);
+			lhLog("TOOL", `✔ finish ${toolName}`, { ms: Math.round(performance.now() - t0) }, toolCallId);
+			return toToolResult(out);
+		} catch (err) {
+			lhLog("TOOL", `✖ error ${toolName}`, { ms: Math.round(performance.now() - t0) }, toolCallId);
+			throw err;
+		}
+	};
 }
 
 /**
@@ -220,6 +235,7 @@ export function serverExecute<P extends TSchema>(
  * semantics would let run on (owner Option A, 2026-09-25).
  */
 export function questionResult(): AgentToolResult<null> {
+	lhLog("TOOL", "questionResult posed (terminate=true, awaiting learner answer)");
 	return {
 		content: [
 			{
@@ -238,6 +254,7 @@ export function questionResult(): AgentToolResult<null> {
  *  arrive as MESSAGES, never as this call's result. terminate: true ends
  *  the turn at the pose; the commitment rides the call's arguments. */
 export function problemResult(): AgentToolResult<null> {
+	lhLog("TOOL", "problemResult posed (terminate=true, awaiting learner practice submission)");
 	return {
 		content: [
 			{

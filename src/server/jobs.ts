@@ -67,6 +67,7 @@ import {
 } from "../core/contracts.ts";
 import type { TurnInput } from "../core/input-events.ts";
 import { hasUnresolvedQuestion, endsInDismissal, endsInQuestionRecovery, type LhMessage } from "../core/native-messages.ts";
+import { lhLog } from "../core/logger.ts";
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
 import { stores, effectiveSettings } from "./stores.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
@@ -221,6 +222,7 @@ function finalizeSteer(steer: SteerMessage): void {
  * wake-acceptance/error semantics. Workers never await this promise. */
 export function deliverJobResult(steer: SteerMessage): Promise<void> {
 	const chatId = chatIdOf(steer);
+	lhLog("JOB", "deliverJobResult queued", { steerId: steer.id, customType: steer.customType, jobId: jobIdOf(steer) ?? undefined }, chatId);
 	const entry = queueSteer(chatId, steer);
 	void pump(chatId);
 	return entry.promise;
@@ -263,6 +265,7 @@ function handOffEligible(chatId: string, agent: Agent): void {
 	if (automaticFollowUpAllowed(chatId, agent) && queue && queue.length > 0) {
 		for (const entry of queue) {
 			if (!entry.waking && !entry.deferred && entry.handedTo !== agent && entry.steer.customType !== "probe-handoff") {
+				lhLog("JOB", "live steer handed to running agent", { steerId: entry.steer.id, jobId: jobIdOf(entry.steer) ?? undefined }, chatId);
 				agent.steer(entry.steer);
 				entry.handedTo = agent;
 			}
@@ -382,9 +385,11 @@ export function settleSteers(chatId: string, persisted: { id?: string }[], faile
 	const remaining: QueuedSteer[] = [];
 	for (const entry of queue) {
 		if (deliveredIds.has(entry.steer.id)) {
+			lhLog("JOB", "settleSteers: steer delivered & durable", { steerId: entry.steer.id }, chatId);
 			finalizeSteer(entry.steer);
 			entry.resolve();
 		} else {
+			lhLog("JOB", "settleSteers: steer stranded -> re-queued for idle wake", { steerId: entry.steer.id }, chatId);
 			const handedHere = entry.handedTo !== undefined && (!settledAgent || entry.handedTo === settledAgent);
 			const wakeHere = settledAgent !== undefined && entry.wakeAgent === settledAgent;
 			if (handedHere) entry.handedTo = undefined;
@@ -575,6 +580,7 @@ async function pump(chatId: string): Promise<void> {
 			// its own live-agent handoff while duplicate callers share it.
 			for (const entry of fire) entry.waking = true;
 			const steers = fire.map((e) => e.steer);
+			lhLog("JOB", "▶ firing IDLE WAKE turn", { steers: steers.map((s) => s.id) }, chatId);
 
 			// Fire the wake with cargo still registered. A 409 releases its
 			// vehicle flag and retries after the existing backoff, without

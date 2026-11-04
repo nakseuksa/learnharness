@@ -26,6 +26,7 @@ import * as path from "node:path";
 import type { ModelRole } from "../../../config.ts";
 import { ROLE_SLOT, modelsNotConfigured, type ModelSlotName, type ProviderKeyMissing } from "../../core/settings.ts";
 import type { ChatStore, JobStore } from "../../core/ports.ts";
+import { lhLog } from "../../core/logger.ts";
 import { runDemoBuilder } from "./demo-builder.ts";
 import { runPdfReaderAgent } from "./pdf-reader.ts";
 import { runResearcherAgent } from "./researcher.ts";
@@ -258,8 +259,16 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			await refuse(keyRefusal.error);
 			return;
 		}
+		const t0 = performance.now();
+		lhLog(
+			"JOB",
+			`▶ runJob start (${job.kind})`,
+			{ chatId: job.chatId, model: `${engine.model.provider}:${engine.model.id}` },
+			jobId,
+		);
 		try {
 			await run(jobId, engine, input, makeLoopContext(jobId, engine));
+			lhLog("JOB", `✔ runJob finished (${job.kind})`, { ms: Math.round(performance.now() - t0) }, jobId);
 		} finally {
 			unregisterJobAbort(jobId);
 			// The last usage write may have been mid-flight when the loop died;
@@ -308,6 +317,12 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		// the record and queues the abort steer itself.
 		if (job.status !== "running") return;
 		const failed = isSubagentFailure(job.kind, result);
+		lhLog(
+			"JOB",
+			failed ? `✖ finishJob failed (${job.kind})` : `✔ finishJob done (${job.kind}) -> queuing steer`,
+			{ chatId: job.chatId, status: failed ? "error" : "done" },
+			jobId,
+		);
 		jobStore.updateJob(jobId, {
 			result,
 			status: failed ? "error" : "done",
