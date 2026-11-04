@@ -26,7 +26,7 @@ import type {
 	ModelSlot,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS, isAppLocale } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
 
@@ -89,6 +89,12 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 			return { ok: false, error: "autoUpdate must be a boolean" };
 		}
 		settings.autoUpdate = raw.autoUpdate;
+	}
+	if (raw.language !== undefined) {
+		if (!isAppLocale(raw.language)) {
+			return { ok: false, error: "language must be 'auto', 'en', or 'zh-CN'" };
+		}
+		settings.language = raw.language;
 	}
 	return { ok: true, settings };
 }

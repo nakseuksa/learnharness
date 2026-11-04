@@ -7,6 +7,7 @@ import type { CallUsage, JobKind, JobRecord } from "@/src/core";
 import { isModelsRefusal, isProviderKeyRefusal, subscriptionLabel, subscriptionLabels } from "@/src/core";
 import { formatTokens, planCostLabel } from "@/components/usage-format";
 import { useServerEvent, useServerResync } from "@/components/server-events";
+import { useI18n } from "@/src/i18n";
 
 /**
  * THE BACKGROUND-AGENTS SECTION (owner, sidebar round — the successor of
@@ -289,6 +290,7 @@ const KIND_ICON: Record<JobKind, typeof SearchIcon> = {
 type AbortState = "pending" | "failed";
 
 export function ActivitySection({ feed: feedProp }: { feed?: ActivityFeed }) {
+	const { t } = useI18n();
 	const ctx = useContext(ActivityContext);
 	const feed = feedProp ?? ctx.feed;
 	const refresh = ctx.refresh;
@@ -347,7 +349,7 @@ export function ActivitySection({ feed: feedProp }: { feed?: ActivityFeed }) {
 		<section data-testid="activity-section" className="border-t border-border px-3 pb-3 pt-2">
 			<div className="mb-1 flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted-foreground/70">
 				<ActivityIcon className="size-3" />
-				Background agents
+				{t("sidebar.backgroundAgents")}
 				{blobs.length > 0 && (
 					<span className="ml-auto tabular-nums" data-testid="activity-total-cost" title="Total running cost (inferred)">
 						{planCostLabel(totalCost, subscriptionLabels(blobs.map((blob) => blob.model)))}

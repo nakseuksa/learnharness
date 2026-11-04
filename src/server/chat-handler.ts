@@ -40,7 +40,7 @@ import {
 	resolveConversationSpec,
 	resolveRoleSpec,
 } from "../core/settings-resolution.ts";
-import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, ROLE_SLOT, type ModelSlotName, type ProviderKeyMissing } from "../core/settings.ts";
+import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, ROLE_SLOT, type ModelSlotName, type ProviderKeyMissing, type ResolvedLocale } from "../core/settings.ts";
 import { beginTurn, endTurn } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
 import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.ts";
@@ -183,7 +183,8 @@ export async function handleChatRequest(
 		}
 		throw err;
 	}
-	return handleChatInput(chatId, input, buildAgent);
+	const clientLangHint = req.headers.get("accept-language") ?? undefined;
+	return handleChatInput(chatId, input, buildAgent, clientLangHint);
 }
 
 /**
@@ -195,6 +196,7 @@ export async function handleChatInput(
 	chatId: string,
 	input: TurnInput,
 	buildAgent?: (opts: AgentBuildOptions & { teaching: boolean }) => TeachingAgent,
+	clientLanguageHint?: string,
 ): Promise<Response> {
 	let record = stores.chatStore.getChat(chatId);
 	if (!record) {
@@ -450,10 +452,10 @@ export async function handleChatInput(
 		// Debug (owner, 2026-10-04): teacher/prober raw provider events under
 		// LH_PROVIDER_EVENTS=1 (provider-events.ts); no-op otherwise.
 		chatId,
-		// The prompt-override switches (P2, 2026-09-19): same resolution
-		// point as the tool delta — the agent layer composes the system
-		// prompt fresh per turn, swapping in any enabled override segments.
 		promptSwitches: effective.agent.prompts,
+		language: (effective.general.language === "zh-CN" || effective.general.language === "en")
+			? effective.general.language
+			: ((clientLanguageHint ?? "").toLowerCase().includes("zh") ? "zh-CN" : "en"),
 	};
 	// PRACTICE BRANCH (owner design, 2026-10-04): a kind:"practice"
 	// session builds the practitioner from turn 1 — no prober→teacher

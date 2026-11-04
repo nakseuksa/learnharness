@@ -12,6 +12,7 @@ import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-sig
 import { useModelCatalog } from "@/components/model-catalog";
 export { useModelCatalog } from "@/components/model-catalog";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
+import { useI18n } from "@/src/i18n";
 
 /** provider:id → known contextWindow over the cached catalog, mirroring
  * the server's catalogContextLimits join. CLI aliases have no global
@@ -38,6 +39,7 @@ export function catalogLimits(catalog: Pick<ModelCatalogResponse, "models">): Ma
  * no-factory-fallback language: the UI never presents a default model).
  */
 export function ModelControl({ chatId, onModelChange }: { chatId?: string; onModelChange?: (model: string | undefined) => void }) {
+	const { t } = useI18n();
 	const { catalog, refresh } = useModelCatalog();
 	const [models, setModels] = useState<ModelsSettings | undefined>();
 	// A successful read with no settings is a legacy session; undefined
@@ -321,7 +323,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				{/* Just the level — the button reads like the model button reads
 				   the model name (owner, stats-control round 1). */}
 				<span className="text-card-foreground">
-					{effectiveLevel === undefined ? "—" : (THINKING_LABEL[effectiveLevel] ?? effectiveLevel)}
+					{effectiveLevel === undefined ? "—" : ((t(`common.thinkingLevels.${effectiveLevel}` as any) as string) || THINKING_LABEL[effectiveLevel] || effectiveLevel)}
 				</span>
 				<span aria-hidden className="text-xs text-muted-foreground">▾</span>
 			</button>

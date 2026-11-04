@@ -73,6 +73,7 @@ import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { useActivity } from "@/components/activity-dock";
 import { useServerEvent, useServerResync } from "@/components/server-events";
+import { useI18n } from "@/src/i18n";
 import { MenuShell } from "@/components/menu-shell.tsx";
 import { DeleteNodeDialog } from "@/components/delete-node-dialog.tsx";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
@@ -925,6 +926,7 @@ export function GraphChromeRow({
 }
 
 export function GraphView({
+
 	chainSelectOpen = false,
 	practiceSelection,
 	onPracticeSelectionChange,
@@ -940,6 +942,7 @@ export function GraphView({
 	onPracticeSelectionChange?: (nodes: { id: string; name: string; statement: string }[]) => void;
 	onChainSelectClose?: () => void;
 }) {
+	const { t } = useI18n();
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const cardRef = useRef<HTMLDivElement | null>(null);
@@ -1470,9 +1473,9 @@ export function GraphView({
 				<div className="flex h-full w-full items-center justify-center px-4">
 					<div className="flex flex-col items-center gap-3 text-center text-muted-foreground">
 						<WaypointsIcon className="size-10 opacity-40" strokeWidth={1.25} />
-						<div className="text-lg font-medium text-foreground">Knowledge graph</div>
+						<div className="text-lg font-medium text-foreground">{t("graph.emptyTitle")}</div>
 						<p className="max-w-sm text-sm">
-							Start a session or import notes to build your graph.
+							{t("graph.emptyDesc")}
 						</p>
 					</div>
 				</div>

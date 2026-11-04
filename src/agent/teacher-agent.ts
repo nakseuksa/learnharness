@@ -23,6 +23,7 @@ import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
+import type { ResolvedLocale } from "../core/settings.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
 /**
@@ -130,7 +131,17 @@ export interface AgentBuildOptions {
 	 *  <chatId>.jsonl via providerEventObserver — the GLM-truncation /
 	 *  DeepSeek-id incident layer. Absent or env-off → no observer. */
 	chatId?: string;
+	/** User's target natural language for teaching interaction ('zh-CN' | 'en'). */
+	language?: ResolvedLocale;
 }
+
+export const LANGUAGE_PROMPT_DIRECTIVES: Record<ResolvedLocale, string> = {
+	"zh-CN": `## 教学与交互语言要求 (Language Requirement)
+你必须始终使用**简体中文**进行所有教学引导、概念解释、追问提问、答疑解惑及生成所有测验与练习卡片。
+保持专业、严谨且亲切的口吻。仅在涉及代码标识符、编程语法、专业技术术语或用户专门要求学习特定外语时保留原文。`,
+	"en": `## Language Requirement
+You must conduct all teaching explanations, conceptual probes, follow-up questions, and quiz generation in English (unless the subject matter specifically studies another language).`,
+};
 
 /**
  * The turn's question-stop rule (docs/pi-engine-swap.md §2; Wave A
@@ -183,9 +194,12 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// ("practice" is not a ModelRole) honest about that.
 	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
 	const stopper = makeQuestionStopper(kind);
-	const systemPrompt = opts.promptSwitches
+	let systemPrompt = opts.promptSwitches
 		? composeInstructions(kind, opts.promptSwitches)
 		: composedInstructions[kind]!;
+	if (opts.language && LANGUAGE_PROMPT_DIRECTIVES[opts.language]) {
+		systemPrompt = `${systemPrompt}\n\n---\n\n${LANGUAGE_PROMPT_DIRECTIVES[opts.language]}`;
+	}
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).

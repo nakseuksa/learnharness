@@ -16,6 +16,7 @@ import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { PathInput } from "@/components/path-input";
 import { SessionStarter } from "@/components/start-session";
 import type { TurnUsage } from "@/src/core";
+import { useI18n } from "@/src/i18n";
 
 /**
  * Home — the knowledge graph is the main view, full-bleed edge to edge
@@ -33,6 +34,7 @@ export function Home({
 	 * changing the setting applies on the next visit home. */
 	rendering?: boolean;
 }) {
+	const { t } = useI18n();
 	const router = useRouter();
 	const [topic, setTopic] = useState("");
 	/* The topic MIRROR ("nothing gets lost" round, 2026-10-01 — same
@@ -272,7 +274,7 @@ export function Home({
 								void start();
 							}
 						}}
-						placeholder={mode === "practice" ? "What do you want to practice?" : "What do you want to learn?"}
+						placeholder={mode === "practice" ? t("home.placeholderPractice") : t("home.placeholderTeach")}
 						autoFocus
 						className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
 					/>
@@ -310,7 +312,7 @@ export function Home({
 										}
 									>
 										{m === "practice" ? <DumbbellIcon aria-hidden="true" className="size-3" /> : null}
-										{m === "teach" ? "Teach" : "Practice"}
+										{m === "teach" ? t("home.modeTeach") : t("home.modePractice")}
 									</button>
 								))}
 							</div>

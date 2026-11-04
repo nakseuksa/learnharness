@@ -330,7 +330,16 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 
 /** General settings — app-level behavior. Version DISPLAY and plans login
  *  live outside the record (package.json / auth.json) by owner decision. */
+export type AppLocale = "auto" | "en" | "zh-CN";
+export type ResolvedLocale = "en" | "zh-CN";
+
+export function isAppLocale(value: unknown): value is AppLocale {
+	return value === "auto" || value === "en" || value === "zh-CN";
+}
+
 export interface GeneralSettings {
+	/** User-chosen UI and interaction language (default auto). */
+	language?: AppLocale;
 	/** Automatic startup/24h update checks (default ON). Manual checks bypass this. */
 	autoUpdate?: boolean;
 }
@@ -507,7 +516,7 @@ export interface FactorySettings {
 
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
-	general: { autoUpdate: true },
+	general: { autoUpdate: true, language: "auto" },
 	dictation: { language: "en" },
 	appearance: {
 		mode: "dark",
@@ -553,6 +562,7 @@ function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
 	const out: GeneralSettings = {};
 	const autoUpdate = boolOrDrop(raw.autoUpdate);
 	if (autoUpdate !== undefined) out.autoUpdate = autoUpdate;
+	if (isAppLocale(raw.language)) out.language = raw.language;
 	return out;
 }
 

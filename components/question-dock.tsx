@@ -8,6 +8,7 @@ import { useEnterSubmits } from "@/components/enter-submits";
 import { PathInput } from "@/components/path-input";
 import { MalformedQuestion } from "@/components/malformed-question";
 import { ToolContentResponse } from "@/components/ai-elements/message";
+import { useI18n } from "@/src/i18n";
 import { cn } from "@/lib/utils";
 import {
 	buildAnswer,
@@ -263,6 +264,7 @@ function QuestionDockForm({
 	dictationClaim = true,
 	compactionRunning = false,
 }: Omit<QuestionDockProps, "expanded" | "onExpand" | "reveal">) {
+	const { t } = useI18n();
 	const kind = toolQuestionKind(toolName);
 
 	// Canonical QuestionData, built once per question. Quiz options are
@@ -565,16 +567,16 @@ function QuestionDockForm({
 			<div data-dock-scroll-area="" data-session-find-root="" className="max-h-[var(--dock-max-h,55dvh)] overflow-y-auto px-4 pt-3">
 				<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 					{toolName === "probe"
-						? "Probe"
+						? t("questions.probe")
 						: toolName === "recall"
-							? "Recall"
+							? t("questions.recall")
 							: kind === "quiz"
 								? qd.questionType === "predict"
-									? "Prediction"
-									: "Check"
+									? t("questions.prediction")
+									: t("questions.check")
 									: kind === "explain"
-										? "Explain"
-											: "Question"}
+										? t("questions.explain")
+										: t("questions.question")}
 					{qd.mode === "multi-select" && " · select all that apply"}
 				</div>
 				<div className="mb-3 font-medium">
@@ -662,7 +664,7 @@ function QuestionDockForm({
 								>
 									{sel.dontKnow && <span className="size-1.5 rounded-full bg-current" />}
 								</span>
-								<span>I don't know</span>
+								<span>{t("questions.dontKnow")}</span>
 							</button>
 						)}
 
@@ -761,7 +763,7 @@ function QuestionDockForm({
 								sel.dontKnow ? "text-muted-foreground/50" : "text-muted-foreground",
 							)}
 						>
-							Confidence
+							{t("questions.confidence")}
 						</span>
 						<div
 							className={cn("relative h-4 min-w-0 flex-1", sel.dontKnow && "opacity-40")}
@@ -792,7 +794,7 @@ function QuestionDockForm({
 								disabled={sel.dontKnow}
 								aria-label="Confidence — the probability your selected answer is correct"
 								aria-valuetext={`${CONFIDENCE_STOPS[confIdx]} percent`}
-								title="The probability your selected answer is correct — 50% is a coin flip. Adjust with ←/→."
+								title={t("questions.confidenceTooltip")}
 								data-testid="confidence-slider"
 								onChange={(e) => {
 									// Snap to the nearest stop; the rendered VALUE is the stop's own
@@ -847,7 +849,7 @@ function QuestionDockForm({
 					className="rounded-[10px] border border-border/70 bg-background/60 transition-colors focus-within:border-primary/50"
 				>
 					<div className="px-2.5 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-						{qd.mode === "text" ? "Your answer" : "YOUR THINKING"}
+						{qd.mode === "text" ? t("questions.yourAnswer") : t("questions.yourThinkingUpper")}
 					</div>
 					{qd.mode === "text" ? (
 						<PathInput
@@ -902,7 +904,7 @@ function QuestionDockForm({
 									submit();
 								}
 							}}
-							placeholder="Why this answer? Whatever comes to mind."
+							placeholder={t("questions.thinkingPlaceholder")}
 							className={cn(
 								"field-sizing-content lh-input max-h-48 w-full resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground/70",
 								// Phase-scaled prominence: teaching invites depth,
@@ -913,14 +915,14 @@ function QuestionDockForm({
 					)}
 					<div className="flex items-center justify-between gap-2 p-1">
 						<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
-								{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
+								{compactionRunning ? t("questions.compactingShortcuts") : t("questions.submitShortcuts")}
 						</span>
 						<Button
 							type="submit"
 							disabled={!canSubmit || compactionRunning}
 							className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 						>
-							Submit answer
+							{t("questions.submitAnswer")}
 						</Button>
 					</div>
 				</div>

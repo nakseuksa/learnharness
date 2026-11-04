@@ -22,6 +22,7 @@ import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
+import { useI18n } from "@/src/i18n";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
@@ -200,6 +201,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
  *  no popping in either direction. */
 export function SidebarToggle() {
 	const { open, toggle } = useSidebar();
+	const { t } = useI18n();
 	return (
 		<span
 			className={cn(
@@ -207,7 +209,7 @@ export function SidebarToggle() {
 				open ? "w-0 -mr-3" : "w-9 mr-0 lh-closed-toggle",
 			)}
 		>
-			<Hint label="Open sidebar" action="toggle-sidebar">
+			<Hint label={t("sidebar.expandSidebar")} action="toggle-sidebar">
 			<Button
 				variant="ghost"
 				size="icon"
@@ -250,15 +252,15 @@ function SessionStatus({ busy }: { busy: boolean }) {
  *  in any locale and it sorts (owner, typography round 5; the old
  *  M/D/YYYY was the US convention. A user-locale setting can come later
  *  — trivial, a format function swap). Pure — exported for tests. */
-export function timeAgo(iso: string, now = new Date()): string {
+export function timeAgo(iso: string, now = new Date(), t?: (key: any, params?: any) => string): string {
 	const ms = now.getTime() - new Date(iso).getTime();
-	if (ms < 60_000) return "just now";
+	if (ms < 60_000) return t ? t("sidebar.timeJustNow") : "just now";
 	const min = Math.floor(ms / 60_000);
-	if (min < 60) return `${min}m ago`;
+	if (min < 60) return t ? t("sidebar.timeMinutesAgo", { min }) : `${min}m ago`;
 	const h = Math.floor(min / 60);
-	if (h < 24) return `${h}h ago`;
+	if (h < 24) return t ? t("sidebar.timeHoursAgo", { h }) : `${h}h ago`;
 	const d = Math.floor(h / 24);
-	if (d < 7) return `${d}d ago`;
+	if (d < 7) return t ? t("sidebar.timeDaysAgo", { d }) : `${d}d ago`;
 	const date = new Date(iso);
 	const mm = String(date.getMonth() + 1).padStart(2, "0");
 	const dd = String(date.getDate()).padStart(2, "0");
@@ -270,14 +272,15 @@ export function timeAgo(iso: string, now = new Date()): string {
  *  typography round 5): it informed no decision — clutter. messageCount
  *  still rides the API payload, so this is a one-line flip back if it's
  *  ever wanted. */
-function sessionMeta(chat: ChatListItem): string {
-	if (chat.compacting) return `Compacting context · ${timeAgo(chat.updatedAt)}`;
-	if (chat.pendingQuestion) return `Waiting for input · ${timeAgo(chat.updatedAt)}`;
+function sessionMeta(chat: ChatListItem, t?: (key: any, params?: any) => string): string {
+	const ago = timeAgo(chat.updatedAt, undefined, t);
+	if (chat.compacting) return t ? `${t("sidebar.statusCompacting")} · ${ago}` : `Compacting context · ${ago}`;
+	if (chat.pendingQuestion) return t ? `${t("sidebar.statusWaiting")} · ${ago}` : `Waiting for input · ${ago}`;
 	if ((chat.kind ?? "teach") === "practice" && chat.pendingProblem) {
-		return `Problem waiting · ${timeAgo(chat.updatedAt)}`;
+		return t ? `${t("sidebar.statusProblemWaiting")} · ${ago}` : `Problem waiting · ${ago}`;
 	}
-	if (chat.busy) return "Working…";
-	return timeAgo(chat.updatedAt);
+	if (chat.busy) return t ? t("sidebar.statusWorking") : "Working…";
+	return ago;
 }
 
 /**
@@ -292,6 +295,7 @@ export function SessionRow({
 	kbdSelected = false,
 	onContextMenu,
 }: {
+	// Use i18n hook
 	chat: ChatListItem;
 	active: boolean;
 	onOpen: () => void;
@@ -301,6 +305,7 @@ export function SessionRow({
 	/** Right-click opens the context menu (wave 6: Rename / Delete). */
 	onContextMenu?: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
+	const { t } = useI18n();
 	return (
 		<button
 			type="button"
@@ -321,7 +326,7 @@ export function SessionRow({
 				    rule, finally applied to the picker too (owner, typography
 				    round): mono = chrome, Source Sans = human words. */}
 				<span className="block truncate font-prose text-(length:--lh-prose-size)">{chat.title}</span>
-				<span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>
+				<span className="block text-xs text-muted-foreground">{sessionMeta(chat, t)}</span>
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
 			    was left of the name; right-aligned keeps the titles flush with
@@ -391,6 +396,7 @@ const KIND_FILTER_KEY = "lh:session-kind-filter";
 
 function SessionsSidebar() {
 	const { open, toggle } = useSidebar();
+	const { t } = useI18n();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
@@ -679,7 +685,7 @@ function SessionsSidebar() {
 							<LhMark className="size-6" />
 						</Link>
 					</Hint>
-					<Hint label="Close sidebar" action="toggle-sidebar">
+					<Hint label={t("sidebar.collapseSidebar")} action="toggle-sidebar">
 						<Button
 							variant="ghost"
 							size="icon"
@@ -704,7 +710,7 @@ function SessionsSidebar() {
 						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
 						<PlusIcon className="size-3" />
-						Teaching
+						{t("sidebar.newTeaching")}
 						<span className="sr-only">create a new teaching session</span>
 					</button>
 					<button
@@ -714,14 +720,14 @@ function SessionsSidebar() {
 						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
 						<DumbbellIcon className="size-3" />
-						Practice
+						{t("sidebar.newPractice")}
 						<span className="sr-only">create a new practice session</span>
 					</button>
 				</div>
 
 				<div className="mx-3 mb-2 flex items-center gap-2">
-					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Sessions</span>
-					<Hint label="Search sessions" action="sessions-search" side="bottom">
+					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">{t("sidebar.sessions")}</span>
+					<Hint label={t("sidebar.searchSessions")} action="sessions-search" side="bottom">
 					<span className="relative flex-1">
 						<Input
 							ref={searchRef}
@@ -771,7 +777,7 @@ function SessionsSidebar() {
 									e.currentTarget.blur();
 								}
 							}}
-							placeholder="Search…"
+							placeholder={t("sidebar.searchPlaceholder")}
 							aria-label="Search sessions"
 							className="h-6 rounded-sm border-border bg-background pl-6 text-xs placeholder:text-muted-foreground/60"
 						/>
@@ -801,7 +807,7 @@ function SessionsSidebar() {
 									: "text-muted-foreground hover:text-foreground",
 							)}
 						>
-							{f === "teach" ? "Teaching" : f === "all" ? "All" : "Practice"}
+							{f === "teach" ? t("sidebar.filterTeach") : f === "all" ? t("sidebar.filterAll") : t("sidebar.filterPractice")}
 						</button>
 					))}
 				</div>
@@ -850,7 +856,7 @@ function SessionsSidebar() {
 					    New session — quiet, bottom-pinned, opens the centered
 					    dialog (also mod+, in the keyboard registry). */}
 					<div className="px-3 pb-3 pt-1">
-						<Hint label="Settings" action="open-settings" side="right">
+						<Hint label={t("sidebar.settings")} action="open-settings" side="right">
 							<button
 								type="button"
 								onClick={() => openSettings()}
@@ -858,7 +864,7 @@ function SessionsSidebar() {
 								className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 							>
 								<SettingsIcon className="size-3" />
-								Settings
+								{t("sidebar.settings")}
 							</button>
 						</Hint>
 					</div>

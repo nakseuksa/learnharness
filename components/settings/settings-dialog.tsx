@@ -42,6 +42,8 @@ import {
 import { useAppearance } from "./appearance.tsx";
 import { SettingsSection } from "./controls.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
+import { InterfaceLanguageSetting } from "./interface-language.tsx";
+import { useI18n } from "@/src/i18n";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
@@ -179,6 +181,7 @@ export function SettingsDialogBody({
 			window.removeEventListener(MENU_CLOSE_EVENT, onClose);
 		};
 	}, []);
+	const { t } = useI18n();
 	const [active, setActive] = useState<SectionId>(initialSection);
 	// A deep-link fired while the dialog is ALREADY open (first exercised by
 	// the wave-6 embedding picker's "Add a provider key first…" link — the
@@ -272,7 +275,7 @@ export function SettingsDialogBody({
 		>
 			{/* Header — the app's quiet CMU title language. */}
 			<header className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5">
-				<h2 className="font-title text-2xl tracking-tight">Settings</h2>
+				<h2 className="font-title text-2xl tracking-tight">{t("settings.title")}</h2>
 				<Hint
 						// Esc closes the dialog (its own listener) — surface it.
 						label="Close"
@@ -320,7 +323,7 @@ export function SettingsDialogBody({
 							}`}
 							onClick={() => setActive(s.id)}
 						>
-							{s.label}
+							{(t as any)(`settings.tabs.${s.id}`) || s.label}
 						</button>
 					))}
 				</nav>
@@ -357,9 +360,11 @@ export function SettingsDialogBody({
 						<div>
 							{active === "general" && (
 								<SettingsSection
-									title="General"
+									title={t("settings.general.sectionTitle")}
+									hint={t("settings.general.sectionHint")}
 									testid="section-general"
 								>
+									<InterfaceLanguageSetting />
 									<UpdateSettings
 										autoUpdate={record.general?.autoUpdate ?? true}
 										onAutoUpdateChange={(on) =>

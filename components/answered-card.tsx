@@ -7,6 +7,7 @@ import { ThinkingBlock } from "@/components/thinking-block";
 import { PathText } from "@/components/file-path-chip";
 import { cn } from "@/lib/utils";
 import { ToolContentResponse } from "@/components/ai-elements/message";
+import { useI18n } from "@/src/i18n";
 import type { QuestionAnswerData } from "@/src/core";
 import { answerForPresentation, parseAskInput, parseQuizInput } from "@/src/core";
 
@@ -22,6 +23,7 @@ import { answerForPresentation, parseAskInput, parseQuizInput } from "@/src/core
  */
 export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionAnswerData; input?: unknown }) {
 	const answer = answerForPresentation(savedAnswer, input);
+	const { t } = useI18n();
 	const [whyOpen, setWhyOpen] = useState(false); // the tucked explanation (predictions, owner 2026-10-03)
 	if (answer.dismissed) {
 		return (
@@ -53,7 +55,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 		    ThinkingBlock, instead of an inset inside the answer. Same muted
 		    rail as before; the label is now plain "Your thinking". */}
 		{answer.readingThinking && (
-			<ThinkingBlock testId="reading-thinking-block" label="YOUR THINKING" text={answer.readingThinking} defaultOpen />
+			<ThinkingBlock testId="reading-thinking-block" label={t("questions.yourThinkingUpper")} text={answer.readingThinking} defaultOpen />
 		)}
 		{/* [&>*:last-child]:mb-0 (owner round, 2026-10-07): on ask cards the
 		    thinking row is the last child — its my-3 stacked with the card's
@@ -68,23 +70,23 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 			    cards label Probe/Recall — the phase boundary visible in the
 			    transcript. No `tool` on old records: kind labels as before. */}
 				{answer.tool === "probe"
-					? "Probe"
+					? t("questions.probe")
 					: answer.tool === "recall"
-						? "Recall"
+						? t("questions.recall")
 						: isQuiz
 								? answer.questionType === "predict"
-									? "Prediction"
-									: "Check"
+									? t("questions.prediction")
+									: t("questions.check")
 									: isExplain
-										? "Explain"
-											: "Question"}
+										? t("questions.explain")
+										: t("questions.question")}
 				{isQuiz &&
 					(answer.dontKnow ? (
-						<span className="rounded bg-muted px-1.5 py-0.5">didn't know</span>
+						<span className="rounded bg-muted px-1.5 py-0.5">{t("questions.didntKnow")}</span>
 					) : answer.correct ? (
-						<span className="rounded bg-green-500/15 px-1.5 py-0.5 text-green-500">correct</span>
+						<span className="rounded bg-green-500/15 px-1.5 py-0.5 text-green-500">{t("questions.correct")}</span>
 					) : (
-						<span className="rounded bg-red-500/15 px-1.5 py-0.5 text-red-500">incorrect</span>
+						<span className="rounded bg-red-500/15 px-1.5 py-0.5 text-red-500">{t("questions.incorrect")}</span>
 					))}
 			</div>
 			<div className="mb-3 font-medium">
@@ -178,7 +180,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 				</div>
 			)}
 			{answer.dontKnow && isQuiz && (
-				<div className="mt-2 text-sm text-muted-foreground">Answered “I don't know”.</div>
+				<div className="mt-2 text-sm text-muted-foreground">{t("questions.answeredDontKnow")}</div>
 			)}
 
 			{(answer.thinking ?? answer.note) && (
@@ -208,11 +210,11 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 						onClick={() => setWhyOpen((v) => !v)}
 						className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
 					>
-						{whyOpen ? "Hide why" : "Why"}
+						{whyOpen ? t("questions.hideWhy") : t("questions.why")}
 					</button>
 					{whyOpen && (
 						<div className="mt-1.5 rounded-lg bg-muted py-2 text-sm text-foreground/50">
-							<span className="font-medium text-muted-foreground">Why: </span>
+							<span className="font-medium text-muted-foreground">{t("questions.whyPrefix")}</span>
 							{/* Keep the first paragraph beside the label, not every paragraph:
 							   later paragraphs must retain their recovered document structure. */}
 							<ToolContentResponse className="inline [&>p:first-child]:inline [&>p:first-child]:m-0">{answer.explanation}</ToolContentResponse>

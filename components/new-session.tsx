@@ -15,6 +15,7 @@ import { ComposerActions, NodePickerControl } from "@/components/composer-action
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
 import type { ChatSettings, GraphSnapshot } from "@/src/core";
+import { useI18n } from "@/src/i18n";
 
 /** The draft's pick set (owner round 10): the SAME shape the home pick
  *  bar lifts — resolved nodes as the learner SAW them at pick time. */
@@ -116,6 +117,7 @@ export function DraftShell({
 	const cycleComposer = useCallback((): readonly HTMLElement[] =>
 		Array.from(document.querySelectorAll<HTMLElement>('[data-testid="composer"] [data-file-path-input]')),
 		[]);
+	const { t } = useI18n();
 	useFieldCycle(cycleComposer);
 	const dictation = useDictation({
 		append: (t) => onChange(joinDictation(text, t)),
@@ -204,7 +206,7 @@ export function DraftShell({
 										// input (owner refinement round, 2026-09-24) — no lesson has
 										// started yet, so the composer must not read like one is in
 										// flight.
-										placeholder={mode === "practice" ? "What do you want to practice?" : "What do you want to learn?"}
+										placeholder={mode === "practice" ? t("home.placeholderPractice") : t("home.placeholderTeach")}
 									/>
 								</div>
 								<StatsBar

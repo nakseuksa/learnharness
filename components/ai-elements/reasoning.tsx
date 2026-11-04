@@ -27,6 +27,7 @@ import { transformMathDelimiters } from "@/src/core";
 import { streamdownPlugins, streamdownRemend } from "./message";
 import { mdComponents } from "@/components/md-blocks";
 import { Shimmer } from "./shimmer";
+import { useI18n } from "@/src/i18n";
 
 interface ReasoningContextValue {
   isStreaming: boolean;
@@ -134,11 +135,16 @@ export type ReasoningTriggerProps = ComponentProps<
    for a few seconds"), bookkeeping for information we knowingly lose. The
    label pairs with the user's collapsed "Your thinking" rows — one
    language; motion (spinner + shimmer) stays the working signal. */
-const defaultGetThinkingMessage = (isStreaming: boolean) => {
+function DefaultThinkingLabel({ isStreaming }: { isStreaming: boolean }) {
+  const { t } = useI18n();
   if (isStreaming) {
-    return <Shimmer duration={1}>Thinking...</Shimmer>;
+    return <Shimmer duration={1}>{t("chat.thinkingStream")}</Shimmer>;
   }
-  return <p>AGENT’S THINKING</p>;
+  return <p>{t("chat.agentsThinking")}</p>;
+}
+
+const defaultGetThinkingMessage = (isStreaming: boolean) => {
+  return <DefaultThinkingLabel isStreaming={isStreaming} />;
 };
 
 export const ReasoningTrigger = memo(

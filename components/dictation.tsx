@@ -8,6 +8,7 @@ import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
 import { setDictationActive } from "@/components/dictation-state";
 export { isDictationActive } from "@/components/dictation-state";
+import { useI18n } from "@/src/i18n";
 
 /**
  * Voice dictation — the cloud engine (STT wave 1, 2026-09-17).
@@ -643,6 +644,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
  *             (full text in the tooltip), cleared on the next click.
  */
 export function DictationBar({ dictation }: { dictation: Dictation }) {
+	const { t } = useI18n();
 	const { phase, error, levelRef, toggle, active, clearError } = dictation;
 	const { open: openSettings } = useSettingsDialog();
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
@@ -695,7 +697,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 		return (
 			<Hint
 				// The error line truncates in the button; its tooltip reveals it.
-				label={error ?? "Dictate"}
+				label={error ?? t("composer.dictate")}
 				action={error ? undefined : "toggle-dictation"}
 				side="top"
 			>
@@ -714,7 +716,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 					className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
 				>
 					<MicIcon className="size-3.5" />
-					<span className="max-w-full truncate">{error ?? "Dictate"}</span>
+					<span className="max-w-full truncate">{error ?? t("composer.dictate")}</span>
 				</button>
 			</Hint>
 		);
