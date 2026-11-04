@@ -73,7 +73,7 @@ import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { useActivity } from "@/components/activity-dock";
 import { useServerEvent, useServerResync } from "@/components/server-events";
-import { useI18n } from "@/src/i18n";
+import { useI18n } from "@/components/i18n";
 import { MenuShell } from "@/components/menu-shell.tsx";
 import { DeleteNodeDialog } from "@/components/delete-node-dialog.tsx";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";

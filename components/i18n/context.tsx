@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import type { AppLocale, ResolvedLocale } from "../core/settings.ts";
+import type { AppLocale, ResolvedLocale } from "@/src/core";
 import type { I18nContextValue, I18nKey } from "./types.ts";
 import { en, type TranslationSchema } from "./locales/en.ts";
 import { zhCN } from "./locales/zh-CN.ts";

@@ -8,7 +8,7 @@ import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
 import { setDictationActive } from "@/components/dictation-state";
 export { isDictationActive } from "@/components/dictation-state";
-import { useI18n } from "@/src/i18n";
+import { useI18n } from "@/components/i18n";
 
 /**
  * Voice dictation — the cloud engine (STT wave 1, 2026-09-17).

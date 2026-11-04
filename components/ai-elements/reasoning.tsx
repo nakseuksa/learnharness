@@ -27,7 +27,7 @@ import { transformMathDelimiters } from "@/src/core";
 import { streamdownPlugins, streamdownRemend } from "./message";
 import { mdComponents } from "@/components/md-blocks";
 import { Shimmer } from "./shimmer";
-import { useI18n } from "@/src/i18n";
+import { useI18n } from "@/components/i18n";
 
 interface ReasoningContextValue {
   isStreaming: boolean;

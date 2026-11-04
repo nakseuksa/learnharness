@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveEffectiveLocale, interpolate, en, zhCN } from "../src/i18n/index.ts";
+import { resolveEffectiveLocale, interpolate, en, zhCN } from "../components/i18n/index.ts";
 import { parseGeneralSettingsBody } from "../src/server/settings-body.ts";
 import { LANGUAGE_PROMPT_DIRECTIVES, createTeacherAgent } from "../src/agent/teacher-agent.ts";
 import { sanitizeUserSettings } from "../src/core/settings.ts";

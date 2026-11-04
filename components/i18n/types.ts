@@ -1,5 +1,5 @@
 import type { TranslationSchema } from "./locales/en.ts";
-import type { AppLocale, ResolvedLocale } from "../core/settings.ts";
+import type { AppLocale, ResolvedLocale } from "@/src/core";
 
 type NestedKeyOf<ObjectType extends object> = {
 	[Key in keyof ObjectType & (string | number)]: ObjectType[Key] extends object

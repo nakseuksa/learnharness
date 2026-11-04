@@ -22,7 +22,7 @@ import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
-import { useI18n } from "@/src/i18n";
+import { useI18n } from "@/components/i18n";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It

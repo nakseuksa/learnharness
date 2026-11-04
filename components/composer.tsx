@@ -3,7 +3,7 @@
 import { useCallback, useLayoutEffect, useState } from "react";
 import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useI18n } from "@/src/i18n";
+import { useI18n } from "@/components/i18n";
 import { Hint } from "@/components/ui/hint";
 import { PathInput } from "@/components/path-input";
 

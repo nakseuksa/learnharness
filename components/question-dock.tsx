@@ -8,7 +8,7 @@ import { useEnterSubmits } from "@/components/enter-submits";
 import { PathInput } from "@/components/path-input";
 import { MalformedQuestion } from "@/components/malformed-question";
 import { ToolContentResponse } from "@/components/ai-elements/message";
-import { useI18n } from "@/src/i18n";
+import { useI18n } from "@/components/i18n";
 import { cn } from "@/lib/utils";
 import {
 	buildAnswer,
