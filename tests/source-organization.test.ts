@@ -56,6 +56,11 @@ it("cycles and missing parents are refused; moving never changes a source key", 
 	assert.equal(canMoveFolder(state, a!, a!), false);
 	assert.throws(() => apply(state, { action: "move", kind: "folder", id: a, parentId: c }), /descendants/);
 	assert.throws(() => apply(state, { action: "move", kind: "source", id: "s1", parentId: "missing" }), /no longer exists/);
+	// i18n phase 1: the English message rides with a stable localization code.
+	assert.throws(() => apply(state, { action: "move", kind: "source", id: "s1", parentId: "missing" }), { code: "parent_folder_missing" });
+	assert.throws(() => apply(state, { action: "move", kind: "folder", id: a, parentId: c }), { code: "folder_cycle" });
+	assert.throws(() => apply(state, { action: "move", kind: "source", id: "nope", parentId: null }), { code: "source_missing", message: "Source no longer exists." });
+	assert.throws(() => apply(state, { action: "rename-folder", id: "nope", name: "X" }), { code: "folder_missing", message: "Folder no longer exists." });
 	state = apply(state, { action: "move", kind: "source", id: "s1", parentId: b });
 	assert.deepEqual(Object.keys(state.placements), ["s1"]);
 });

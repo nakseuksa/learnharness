@@ -7,8 +7,16 @@ import {
 	applyOrganizationAction, parseOrganizationAction, placeImportedSource, placementOf,
 	type SourceDirectory, type SourceEntry,
 } from "../core/source-organization.ts";
+import { SourceOrganizationError, type SourceErrorCode } from "../core/source-errors.ts";
 
-export class SourceOrganizationInputError extends Error {}
+export class SourceOrganizationInputError extends Error {
+	/** Optional stable code for client localization; `message` stays English. */
+	readonly code?: SourceErrorCode;
+	constructor(message: string, code?: SourceErrorCode) {
+		super(message);
+		if (code) this.code = code;
+	}
+}
 
 export function createSourceDirectory(deps: { chatStore: ChatStore; graphStore: GraphStore; sourceOrganizationStore: SourceOrganizationStore }) {
 	const freshFolder = () => ({ id: `folder_${randomUUID()}`, createdAt: new Date().toISOString() });
@@ -34,7 +42,7 @@ export function createSourceDirectory(deps: { chatStore: ChatStore; graphStore: 
 		const directory = read();
 		if (action.action === "rename-source") {
 			const entry = directory.sources.find((s) => s.id === action.id);
-			if (!entry || entry.kind === "missing") throw new SourceOrganizationInputError("Source no longer exists.");
+			if (!entry || entry.kind === "missing") throw new SourceOrganizationInputError("Source no longer exists.", "source_missing");
 			if (entry.kind === "chat") deps.chatStore.renameChat(entry.id, action.name);
 			else {
 				const state = directory.organization;
@@ -45,7 +53,9 @@ export function createSourceDirectory(deps: { chatStore: ChatStore; graphStore: 
 			let next;
 			const fresh = freshFolder();
 			try { next = applyOrganizationAction(directory.organization, action, new Set(directory.sources.map((s) => s.id)), fresh); }
-			catch (error) { throw new SourceOrganizationInputError((error as Error).message); }
+			catch (error) {
+				throw new SourceOrganizationInputError((error as Error).message, error instanceof SourceOrganizationError ? error.code : undefined);
+			}
 			deps.sourceOrganizationStore.write(next);
 			if (action.action === "create-folder") createdFolderId = fresh.id;
 		}

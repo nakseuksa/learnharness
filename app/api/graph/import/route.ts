@@ -25,6 +25,8 @@ import {
 	PROVIDER_KEY_MISSING_CODE,
 	ProviderKeyMissingError,
 	type EmissionStats,
+	type SourceErrorCode,
+	type SourceNoticeCode,
 } from "@/src/core";
 
 export const dynamic = "force-dynamic";
@@ -39,36 +41,43 @@ interface ImportResult {
 	/** The machine discriminator when ok:false is a config refusal — the
 	 * BYOK models refusal (owner, 2026-09-22) or the provider-key refusal
 	 * (2026-09-25); the client can open the setup/keys flow off it. */
-	code?: "models_not_configured" | (typeof PROVIDER_KEY_MISSING_CODE);
+	code?: "models_not_configured" | (typeof PROVIDER_KEY_MISSING_CODE) | SourceErrorCode;
+	/** Localization parameters for `code` (i18n phase 1). */
+	params?: Record<string, number>;
 	missing?: string[];
 	/** The key-refusal specifics (provider_key_missing only). */
 	provider?: string;
 	slots?: string[];
 	/** Shown beside a completed import (every PDF: scanner text may be wrong). */
 	notice?: string;
+	noticeCode?: SourceNoticeCode;
+	noticeParams?: Record<string, number>;
 }
 
 const MAX_PDF_PAGES = 1000;
 const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d]; // "%PDF-"
 
-type NotesFile = { kind: "notes"; text: string; notice?: string } | { kind: "refused"; error: string };
+type NotesFile =
+	| { kind: "notes"; text: string; notice?: string; noticeCode?: SourceNoticeCode; noticeParams?: Record<string, number> }
+	| { kind: "refused"; error: string; code: SourceErrorCode; params?: Record<string, number> };
 
-/** A PDF becomes page-marked Markdown; any other file is read as text, as before. */
+/** A PDF becomes page-marked Markdown; any other file is read as text, as before.
+ * English text stays the wire `error`/`notice`; codes let the client localize. */
 async function readNotesFile(file: File): Promise<NotesFile> {
 	const bytes = new Uint8Array(await file.arrayBuffer());
 	if (!PDF_MAGIC.every((byte, i) => bytes[i] === byte)) return { kind: "notes", text: new TextDecoder().decode(bytes) };
 	const pdf = await convertPdf(bytes, MAX_PDF_PAGES);
 	switch (pdf.kind) {
 		case "unreadable":
-			return { kind: "refused", error: "Could not open this PDF." };
+			return { kind: "refused", error: "Could not open this PDF.", code: "pdf_unreadable" };
 		case "too-long":
-			return { kind: "refused", error: "Too long. Max 1,000 pages." };
+			return { kind: "refused", error: "Too long. Max 1,000 pages.", code: "pdf_too_long", params: { maxPages: MAX_PDF_PAGES } };
 		case "converted": {
 			const text = joinPages(pdf.pages);
-			if (!text) return { kind: "refused", error: "OCR not supported yet." };
+			if (!text) return { kind: "refused", error: "OCR not supported yet.", code: "pdf_no_text" };
 			const skipped = pdf.pages.filter((page) => page.kind === "image-only").length;
 			const omission = skipped > 0 ? ` Skipped ${skipped} image-only ${skipped === 1 ? "page" : "pages"}; OCR is not supported.` : "";
-			return { kind: "notes", text, notice: `Scanned pages may have errors.${omission}` };
+			return { kind: "notes", text, notice: `Scanned pages may have errors.${omission}`, noticeCode: "pdf_scanned", noticeParams: { skipped } };
 		}
 	}
 }
@@ -115,13 +124,13 @@ export async function POST(request: Request) {
 		form = await readImportForm(request);
 	} catch (err) {
 		const oversized = err instanceof ImportBodyLimitError;
-		return Response.json({ results: [] as ImportResult[], error: oversized
-			? "Import request is too large. Select fewer files."
-			: "Could not read the upload. It may be incomplete; please select the files again." }, { status: oversized ? 413 : 400 });
+		return Response.json({ results: [] as ImportResult[], ...(oversized
+			? { error: "Import request is too large. Select fewer files.", code: "import_body_too_large" }
+			: { error: "Could not read the upload. It may be incomplete; please select the files again.", code: "import_body_unreadable" }) }, { status: oversized ? 413 : 400 });
 	}
 	const files = form.getAll("files").filter((f): f is File => f instanceof File);
 	if (files.reduce((total, file) => total + file.size, 0) > MAX_IMPORT_BYTES) {
-		return Response.json({ results: [] as ImportResult[], error: "Too big. Max 25 MB." }, { status: 413 });
+		return Response.json({ results: [] as ImportResult[], error: "Too big. Max 25 MB.", code: "import_too_big" }, { status: 413 });
 	}
 	if (files.length === 0) {
 		return Response.json({ results: [] as ImportResult[], error: "no files" }, { status: 400 });
@@ -147,12 +156,14 @@ export async function POST(request: Request) {
 			try {
 				const notes = await readNotesFile(file);
 				if (notes.kind === "refused") {
-					results.push({ filePath, requestIndex, outcome: "failed", ok: false, error: notes.error });
+					results.push({ filePath, requestIndex, outcome: "failed", ok: false, error: notes.error, code: notes.code, ...(notes.params ? { params: notes.params } : {}) });
 					continue;
 				}
 				sourceDirectory.registerImport(filePath);
 				const stats = await extraction.importNotes({ filePath, text: notes.text });
-				results.push({ filePath, requestIndex, outcome: "completed", ok: true, stats, ...(notes.notice ? { notice: notes.notice } : {}) });
+				results.push({ filePath, requestIndex, outcome: "completed", ok: true, stats,
+					...(notes.notice ? { notice: notes.notice } : {}),
+					...(notes.noticeCode ? { noticeCode: notes.noticeCode, noticeParams: notes.noticeParams } : {}) });
 			} catch (err) {
 				if (err instanceof ModelsNotConfiguredError) {
 					results.push({ filePath, ok: false, requestIndex, outcome: "failed", error: err.envelope.error,
@@ -164,6 +175,7 @@ export async function POST(request: Request) {
 					results.push({ filePath, requestIndex, ok: false,
 						outcome: err instanceof NotesImportError ? err.outcome : "failed",
 						...(err instanceof NotesImportError ? { stats: err.partialStats } : {}),
+						...(err instanceof NotesImportError && err.outcome === "busy" ? { code: "import_busy" as const } : {}),
 						error: err instanceof Error ? err.message : String(err) });
 				}
 			} finally { emit("sources-changed", {}); }

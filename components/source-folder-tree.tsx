@@ -5,6 +5,8 @@ import { ChevronRightIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
 import { canMoveFolder, folderIsEmpty, fuzzyScore, placementOf, folderEntryCheck, type SourceEntrySelection, type OrganizationAction, type SourceDirectory } from "@/src/core";
 import type { ChainSort } from "./chain-table";
 import { chainRow } from "./chain-navigation";
+import { useI18n } from "@/components/i18n";
+import { sourceErrorText } from "./source-error-text";
 
 export type OrganizationChange = (action: OrganizationAction) => Promise<string | void>;
 const DRAG_TYPE = "application/x-learnharness-source";
@@ -62,8 +64,10 @@ export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = 
 	name: string; onSave: (name: string) => Promise<unknown>; onCancel?: () => void; initiallyEditing?: boolean;
 }) {
 	const [editing, setEditing] = useState(initiallyEditing);
+	const { t } = useI18n();
 	const [draft, setDraft] = useState(name);
-	const [failure, setFailure] = useState("");
+	// Kept as the thrown value so a language switch re-renders it localized.
+	const [failure, setFailure] = useState<unknown>(undefined);
 	const input = useRef<HTMLInputElement>(null);
 	const submitting = useRef(false);
 	const cancelled = useRef(false);
@@ -76,21 +80,22 @@ export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = 
 		if (!value) { setEditing(false); onCancel?.(); return; }
 		if (value === name && !initiallyEditing) { setEditing(false); return; }
 		submitting.current = true;
-		try { await onSave(value); setEditing(false); setFailure(""); }
-		catch (error) { setFailure(error instanceof Error ? error.message : String(error)); input.current?.focus(); }
+		try { await onSave(value); setEditing(false); setFailure(undefined); }
+		catch (error) { setFailure(error instanceof Error ? error : String(error)); input.current?.focus(); }
 		finally { submitting.current = false; }
 	};
+	const failureText = failure ? sourceErrorText(t, failure) : "";
 	return <span className="min-w-0 flex-1">
-		{editing ? <input ref={input} value={draft} placeholder="Folder name" aria-label="Source or folder name" data-testid="source-name-input"
+		{editing ? <input ref={input} value={draft} placeholder={t("sources.tree.folderNamePlaceholder")} aria-label={t("sources.tree.nameInputLabel")} data-testid="source-name-input"
 			className="block h-5 w-full min-w-0 border-0 bg-transparent p-0 text-sm font-medium leading-5 outline-none shadow-none focus:ring-0"
 			onChange={(e) => setDraft(e.target.value)} onBlur={() => { void commit(); }}
 			onKeyDown={(e) => {
-				if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelled.current = true; setEditing(false); setFailure(""); onCancel?.(); }
+				if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelled.current = true; setEditing(false); setFailure(undefined); onCancel?.(); }
 				if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); void commit(); }
 			}} onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }} />
-			: <button type="button" className="block max-w-full truncate rounded-sm text-left text-sm font-medium leading-5 transition-colors hover:bg-accent" title="Rename"
+			: <button type="button" className="block max-w-full truncate rounded-sm text-left text-sm font-medium leading-5 transition-colors hover:bg-accent" title={t("sources.tree.rename")}
 				onClick={() => { cancelled.current = false; setDraft(name); setEditing(true); }}>{name}</button>}
-		{failure && <span role="alert" className="block text-xs text-red-400">{failure}</span>}
+		{failureText && <span role="alert" className="block text-xs text-red-400">{failureText}</span>}
 	</span>;
 }
 
@@ -111,6 +116,7 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 }) {
 	const [dropTarget, setDropTarget] = useState<string | null | undefined>(undefined);
 	const [draggedItem, setDraggedItem] = useState<{ kind: "source" | "folder"; id: string }>();
+	const { t } = useI18n();
 	if (!directory) return <>{groups.map((g) => renderSource(g, 0))}</>;
 	const state = directory.organization;
 	const ids = new Set(directory.sources.map((s) => s.id));
@@ -180,16 +186,16 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 					data-drop-active={dropTarget === folder.id}
 					className={`flex items-center gap-1 py-1.5 pr-3 transition-colors ${!open || !hasChildren ? "border-b border-transparent" : ""} ${dropTarget === folder.id ? "bg-accent/50" : ""}`}
 					style={{ paddingLeft: 12 + depth * 36 }}>
-					<input type="checkbox" aria-label={`Select ${sourceSelection ? "folder" : "contents of"} ${folder.name}`} data-testid={`folder-checkbox-${folder.id}`}
+					<input type="checkbox" aria-label={t(sourceSelection ? "sources.tree.selectFolder" : "sources.tree.selectFolderContents", { name: folder.name })} data-testid={`folder-checkbox-${folder.id}`}
 						className="size-3.5 shrink-0 accent-primary" disabled={entryCheck ? false : empty ? !allowEmptySelection : members.length === 0}
 						checked={entryCheck?.checked ?? (empty ? selectedFolders.has(folder.id) : members.length > 0 && selectedCount === members.length)}
 						ref={(el) => { if (el) el.indeterminate = entryCheck?.indeterminate ?? (!empty && selectedCount > 0 && selectedCount < members.length); }}
 						onChange={(e) => { if (entryCheck || empty) onToggleFolder(folder.id, e.target.checked); else onToggleNodes(members, e.target.checked); }} />
-					<button type="button" aria-expanded={open} aria-label={`Expand folder ${folder.name}`} data-testid={`folder-toggle-${folder.id}`}
+					<button type="button" aria-expanded={open} aria-label={t("sources.tree.expandFolder", { name: folder.name })} data-testid={`folder-toggle-${folder.id}`}
 						onClick={() => onToggleExpanded(folder.id)} className="flex h-5 w-3.5 shrink-0 items-center justify-center text-muted-foreground/70">
 						<ChevronRightIcon className={`size-3.5 ${open ? "rotate-90" : ""}`} />
 					</button>
-					<button type="button" data-source-icon data-testid={`folder-icon-${folder.id}`} aria-expanded={open} aria-label={`Expand folder ${folder.name}`}
+					<button type="button" data-source-icon data-testid={`folder-icon-${folder.id}`} aria-expanded={open} aria-label={t("sources.tree.expandFolder", { name: folder.name })}
 						onClick={() => onToggleExpanded(folder.id)} className="flex h-5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
 						{open ? <FolderOpenIcon className="size-3.5 shrink-0" /> : <FolderIcon className="size-3.5 shrink-0" />}
 					</button>
@@ -211,7 +217,7 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 		} catch { /* An unrelated native text/file drag is not an organization move. */ }
 	}} onDragEnd={() => { setDropTarget(undefined); setDraggedItem(undefined); }}>
 		<div>{renderLevel(null, 0)}</div>
-		{onAction && <div data-testid="source-root-drop" aria-label="Move outside folders" data-drop-active={dropTarget === null}
+		{onAction && <div data-testid="source-root-drop" aria-label={t("sources.tree.rootDrop")} data-drop-active={dropTarget === null}
 			className={`min-h-16 flex-1 transition-colors ${dropTarget === null ? "bg-accent/30" : ""}`} {...dropProps(null)} />}
 	</div>;
 }

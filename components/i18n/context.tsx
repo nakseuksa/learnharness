@@ -2,16 +2,9 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { AppLocale, ResolvedLocale } from "@/src/core";
-import type { I18nContextValue, I18nKey } from "./types.ts";
-import { en, type TranslationSchema } from "./locales/en.ts";
-import { zhCN } from "./locales/zh-CN.ts";
-import { interpolate } from "./interpolate.ts";
+import type { I18nContextValue } from "./types.ts";
+import { createTranslator } from "./translate.ts";
 import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-signal";
-
-const DICTIONARIES: Record<ResolvedLocale, TranslationSchema> = {
-	en,
-	"zh-CN": zhCN,
-};
 
 export function resolveEffectiveLocale(
 	preference: AppLocale | undefined,
@@ -25,20 +18,15 @@ export function resolveEffectiveLocale(
 	return lang.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
 }
 
-function getTranslation(dict: TranslationSchema, path: string): string | undefined {
-	const parts = path.split(".");
-	let curr: any = dict;
-	for (const part of parts) {
-		if (!curr || typeof curr !== "object") return undefined;
-		curr = curr[part];
-	}
-	return typeof curr === "string" ? curr : undefined;
-}
-
 const I18nContext = createContext<I18nContextValue | null>(null);
+const EN_TRANSLATOR = createTranslator("en");
 
-export function I18nProvider({ children }: { children: React.ReactNode }) {
-	const [locale, setLocaleState] = useState<AppLocale>("auto");
+export function I18nProvider({ children, initialLocale = "auto" }: {
+	children: React.ReactNode;
+	/** Test seam only; production starts at "auto" and loads /api/settings. */
+	initialLocale?: AppLocale;
+}) {
+	const [locale, setLocaleState] = useState<AppLocale>(initialLocale);
 	const [systemLang, setSystemLang] = useState<string>("en");
 
 	// Client-side detection of system language
@@ -76,6 +64,11 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 		return resolveEffectiveLocale(locale, systemLang);
 	}, [locale, systemLang]);
 
+	// Keep <html lang> in step with the resolved UI language.
+	useEffect(() => {
+		document.documentElement.lang = resolvedLocale;
+	}, [resolvedLocale]);
+
 	const setLocale = useCallback(async (nextLocale: AppLocale) => {
 		setLocaleState(nextLocale);
 		try {
@@ -90,21 +83,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 		}
 	}, []);
 
-	const t = useCallback(
-		(key: I18nKey, params?: Record<string, string | number>): string => {
-			const activeDict = DICTIONARIES[resolvedLocale] ?? en;
-			let text = getTranslation(activeDict, key);
-			// Fallback to English if translation is missing
-			if (text === undefined && activeDict !== en) {
-				text = getTranslation(en, key);
-			}
-			if (text === undefined) {
-				return key;
-			}
-			return interpolate(text, params);
-		},
-		[resolvedLocale],
-	);
+	const t = useMemo(() => createTranslator(resolvedLocale), [resolvedLocale]);
 
 	const value = useMemo<I18nContextValue>(
 		() => ({
@@ -122,16 +101,14 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 export function useI18n(): I18nContextValue {
 	const context = useContext(I18nContext);
 	if (!context) {
-		// Fallback for SSR or tests without Provider
-		const resolvedLocale = resolveEffectiveLocale("auto");
+		// Fallback for SSR or tests without Provider: always English, so output
+		// never depends on the host machine's language (production always
+		// mounts the provider in app/layout.tsx).
 		return {
 			locale: "auto",
-			resolvedLocale,
+			resolvedLocale: "en",
 			setLocale: async () => {},
-			t: (key: I18nKey, params?: Record<string, string | number>) => {
-				const text = getTranslation(DICTIONARIES[resolvedLocale], key) ?? getTranslation(en, key) ?? key;
-				return interpolate(text, params);
-			},
+			t: EN_TRANSLATOR,
 		};
 	}
 	return context;

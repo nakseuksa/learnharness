@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { createNotesImportQueue } from "../components/notes-import-queue.ts";
+import { createNotesImportQueue, formatImportMessage, type ImportMessage } from "../components/notes-import-queue.ts";
+import { createTranslator } from "../components/i18n/index.ts";
 import type { NotesImportResult } from "../components/notes-import.tsx";
+// The queue keeps structured rows; English rendering is unchanged from before i18n.
+const en = createTranslator("en");
+const text = (rows: readonly ImportMessage[]) => rows.map((m) => formatImportMessage(m, en));
 const tick = () => new Promise<void>((done) => setImmediate(done));
 const file = (name: string, path?: string) => { const f = new File(["notes"], name); if (path) Object.defineProperty(f, "webkitRelativePath", { value: path }); return f; };
 const success = (name: string): NotesImportResult => ({ requestIndex: 0, filePath: name, ok: true, outcome: "completed", stats: { nodes: 0 } });
@@ -23,7 +27,7 @@ it("one appendable queue stays three-wide across same-tick selections, refilling
 	assert.equal(queue.getSnapshot().completion, 0);
 	calls[0]!.resolve([success("a.md")]); await tick();
 	assert.equal(queue.getSnapshot().importing, false); assert.equal(queue.getSnapshot().completion, 1);
-	assert.deepEqual(queue.getSnapshot().errors, ["c.md: lost response"]);
+	assert.deepEqual(text(queue.getSnapshot().errors), ["c.md: lost response"]);
 	assert.equal(calls.length, 6, "no automatic retry");
 });
 
@@ -36,8 +40,8 @@ it("errors/notices keep selection order across appends even when requests settle
 	pending[1]!([{ requestIndex: 0, filePath: "B/same.md", ok: false, outcome: "partial", error: "second" }]);
 	pending[0]!([{ requestIndex: 0, filePath: "A/same.md", ok: false, outcome: "busy", error: "first" }]);
 	await tick();
-	assert.deepEqual(queue.getSnapshot().errors, ["A/same.md: first", "B/same.md: second"]);
-	assert.deepEqual(queue.getSnapshot().notices, ["B/c.pdf: Scanner caveat"]);
+	assert.deepEqual(text(queue.getSnapshot().errors), ["A/same.md: first", "B/same.md: second"]);
+	assert.deepEqual(text(queue.getSnapshot().notices), ["B/c.pdf: Scanner caveat"]);
 });
 
 it("unsupported-only directories are never sent; picker .DS_Store is ignored and eligible siblings proceed", async () => {
@@ -46,7 +50,7 @@ it("unsupported-only directories are never sent; picker .DS_Store is ignored and
 	queue.append([file(".DS_Store", "Root/.DS_Store"), file("a.png", "Root/Images/a.png"), file("notes.md", "Root/Sub/notes.md"), file("bad.txt", "../bad.txt")]);
 	await tick();
 	assert.deepEqual(paths, ["Root/Sub/notes.md"]);
-	assert.deepEqual(queue.getSnapshot().errors, ["Root/Images/a.png: Unsupported format or unsafe relative path.", "../bad.txt: Unsupported format or unsafe relative path."]);
+	assert.deepEqual(text(queue.getSnapshot().errors), ["Root/Images/a.png: Unsupported format or unsafe relative path.", "../bad.txt: Unsupported format or unsafe relative path."]);
 });
 
 it("synchronous transport failures settle one wave once without reentrant pump recursion", async () => {

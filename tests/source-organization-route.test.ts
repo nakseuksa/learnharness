@@ -64,8 +64,12 @@ it("server validates cycles, stale sources/parents and nonempty folders, includi
 	const created = await (await change({ action: "create-folder", name: "Empty", parentId: null })).json();
 	const folder = created.organization.folders.find((f: { name: string }) => f.name === "Empty");
 	assert.equal(created.createdFolderId, folder.id, "creation identifies the exact new row, even with duplicate folder names");
-	assert.equal((await change({ action: "move", kind: "folder", id: folder.id, parentId: folder.id })).status, 400);
-	assert.equal((await change({ action: "move", kind: "source", id: "unknown", parentId: folder.id })).status, 400);
+	const cycle = await change({ action: "move", kind: "folder", id: folder.id, parentId: folder.id });
+	assert.equal(cycle.status, 400);
+	assert.deepEqual(await cycle.json(), { error: "A folder cannot be moved into itself or its descendants.", code: "folder_cycle" });
+	const stale = await change({ action: "move", kind: "source", id: "unknown", parentId: folder.id });
+	assert.equal(stale.status, 400);
+	assert.equal((await stale.json()).code, "source_missing");
 	assert.equal((await change({ action: "move", kind: "source", id: sourceId("Root/empty.md"), parentId: folder.id })).status, 200);
 	assert.equal((await change({ action: "delete-folder", id: folder.id })).status, 400);
 	assert.equal((await change({ action: "move", kind: "source", id: sourceId("Root/empty.md"), parentId: null })).status, 200);

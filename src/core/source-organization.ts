@@ -1,3 +1,5 @@
+import { SourceOrganizationError } from "./source-errors.ts";
+
 /** Source organization is presentation metadata, never graph/extraction identity.
  * A source has one parent; folders have stable IDs independent of names/paths. */
 export interface SourceFolder {
@@ -101,21 +103,21 @@ export function parseOrganizationAction(raw: unknown): OrganizationAction {
 export function applyOrganizationAction(state: SourceOrganization, action: Exclude<OrganizationAction, { action: "rename-source" }>,
 	sourceIds: ReadonlySet<string>, newFolder: { id: string; createdAt: string }): SourceOrganization {
 	const next = structuredClone(state);
-	if ("parentId" in action && action.parentId !== null && !next.folders.some((f) => f.id === action.parentId)) throw new Error("Parent folder no longer exists.");
+	if ("parentId" in action && action.parentId !== null && !next.folders.some((f) => f.id === action.parentId)) throw new SourceOrganizationError("Parent folder no longer exists.", "parent_folder_missing");
 	if (action.action === "create-folder") {
 		next.folders.push({ ...newFolder, name: action.name, parentId: action.parentId });
 		return next;
 	}
 	if (action.action === "move" && action.kind === "source") {
-		if (!sourceIds.has(action.id)) throw new Error("Source no longer exists.");
+		if (!sourceIds.has(action.id)) throw new SourceOrganizationError("Source no longer exists.", "source_missing");
 		next.placements = { ...next.placements, [action.id]: { ...placementOf(next, action.id), folderId: action.parentId } };
 		return next;
 	}
 	const folder = next.folders.find((f) => f.id === action.id);
-	if (!folder) throw new Error("Folder no longer exists.");
+	if (!folder) throw new SourceOrganizationError("Folder no longer exists.", "folder_missing");
 	if (action.action === "rename-folder") folder.name = action.name;
 	else if (action.action === "move") {
-		if (!canMoveFolder(next, action.id, action.parentId)) throw new Error("A folder cannot be moved into itself or its descendants.");
+		if (!canMoveFolder(next, action.id, action.parentId)) throw new SourceOrganizationError("A folder cannot be moved into itself or its descendants.", "folder_cycle");
 		folder.parentId = action.parentId;
 	} else {
 		if (!folderIsEmpty(next, action.id, sourceIds)) throw new Error("Only empty folders can be removed. Move their entries out first.");

@@ -865,6 +865,7 @@ export function GraphChromeRow({
 	 *  2026-09-29). */
 	onOpenChains: () => void;
 }) {
+	const { t } = useI18n();
 	return (
 		<>
 			{!isEmpty && (
@@ -896,7 +897,7 @@ export function GraphChromeRow({
 			{/* The chain table (chains overlay, owner plan 2026-09-29). Own
 			    container (36px band), between the search and Import. */}
 			<div className="graph-chrome-fade-in shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
-					<Hint label="Every reasoning chain" side="bottom">
+					<Hint label={t("sources.entry.chainsHint")} side="bottom">
 						<button
 							type="button"
 							onClick={onOpenChains}
@@ -904,7 +905,7 @@ export function GraphChromeRow({
 							className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent"
 						>
 							<ListTreeIcon className="size-3" />
-							Chains
+							{t("sources.entry.chains")}
 						</button>
 					</Hint>
 				</div>

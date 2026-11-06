@@ -121,7 +121,10 @@ it("a PDF reaches the pipeline as page-marked Markdown and reports skipped image
 	const byName = (name: string) => results.find((r: { filePath: string }) => r.filePath === name);
 	assert.equal(byName("lecture.pdf").outcome, "completed");
 	assert.equal(byName("lecture.pdf").notice, "Scanned pages may have errors. Skipped 1 image-only page; OCR is not supported.");
+	assert.equal(byName("lecture.pdf").noticeCode, "pdf_scanned");
+	assert.deepEqual(byName("lecture.pdf").noticeParams, { skipped: 1 });
 	assert.equal(byName("notes.md").notice, undefined, "text files carry no notice");
+	assert.equal(byName("notes.md").noticeCode, undefined);
 });
 
 it("PDFs are known by their bytes, not their names", async () => {
@@ -143,11 +146,13 @@ it("PDFs with nothing to import are refused before any model call", async () => 
 	const { results } = await response.json();
 	assert.equal(calls, 0);
 	const errorOf = (name: string) => results.find((r: { filePath: string }) => r.filePath === name);
-	for (const [name, error] of [["scan.pdf", "OCR not supported yet."], ["broken.pdf", "Could not open this PDF."], ["huge.pdf", "Too long. Max 1,000 pages."]] as const) {
+	for (const [name, error, code] of [["scan.pdf", "OCR not supported yet.", "pdf_no_text"], ["broken.pdf", "Could not open this PDF.", "pdf_unreadable"], ["huge.pdf", "Too long. Max 1,000 pages.", "pdf_too_long"]] as const) {
 		assert.equal(errorOf(name).ok, false);
 		assert.equal(errorOf(name).outcome, "failed");
 		assert.equal(errorOf(name).error, error);
+		assert.equal(errorOf(name).code, code, "the English error rides with a stable localization code");
 	}
+	assert.deepEqual(errorOf("huge.pdf").params, { maxPages: 1000 });
 });
 
 it("PDF notices count only image-only pages, not blanks, and preserve the scanner caveat for text-only PDFs", async () => {
@@ -161,6 +166,7 @@ it("PDF notices count only image-only pages, not blanks, and preserve the scanne
 	assert.equal(results.find((r: { filePath: string }) => r.filePath === "mixed.pdf").notice,
 		"Scanned pages may have errors. Skipped 2 image-only pages; OCR is not supported.");
 	assert.equal(results.find((r: { filePath: string }) => r.filePath === "text.pdf").notice, "Scanned pages may have errors.");
+	assert.deepEqual(results.find((r: { filePath: string }) => r.filePath === "text.pdf").noticeParams, { skipped: 0 });
 	assert.ok(results.every((r: { ok: boolean }) => r.ok));
 });
 
@@ -184,7 +190,7 @@ for (const split of [false, true]) it(`server refuses actual file bytes over 25 
 	req.headers.set("content-length", "1"); // not a trustworthy bound
 	const response = await POST(req);
 	assert.equal(response.status, 413);
-	assert.deepEqual(await response.json(), { results: [], error: "Too big. Max 25 MB." });
+	assert.deepEqual(await response.json(), { results: [], error: "Too big. Max 25 MB.", code: "import_too_big" });
 	assert.equal(calls, 0);
 });
 
@@ -211,7 +217,7 @@ for (const declared of [undefined, "1"]) it(`server bounds streamed body bytes w
 	} as RequestInit);
 	const response = await POST(req);
 	assert.equal(response.status, 413);
-	assert.deepEqual(await response.json(), { results: [], error: "Import request is too large. Select fewer files." });
+	assert.deepEqual(await response.json(), { results: [], error: "Import request is too large. Select fewer files.", code: "import_body_too_large" });
 	assert.equal(chunks, MAX_IMPORT_BODY_BYTES / (1024 * 1024) + 1);
 	assert.equal(cancelled, true);
 	assert.equal(calls, 0);
@@ -242,7 +248,7 @@ it("malformed or proxy-truncated multipart is refused before any file enters the
 	]) {
 		const response = await POST(req);
 		assert.equal(response.status, 400);
-		assert.deepEqual(await response.json(), { results: [], error: "Could not read the upload. It may be incomplete; please select the files again." });
+		assert.deepEqual(await response.json(), { results: [], error: "Could not read the upload. It may be incomplete; please select the files again.", code: "import_body_unreadable" });
 	}
 	assert.equal(calls, 0);
 });
